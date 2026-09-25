@@ -1,0 +1,185 @@
+openapi: 3.1.0
+info:
+  title: VeriTrace Telemetry API
+  version: 0.1.0
+  summary: Cold-chain readings, incidents, and the real-time notification WebSocket.
+  description: |
+    Conventions, error codes, and the endpoint inventory are defined in
+    `platform-infrastructure/docs/contracts/rest-api.md`; the WebSocket protocol is defined in
+    `platform-infrastructure/docs/contracts/messaging.md`. Each endpoint's schema is added here together
+    with its implementation (contract first).
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8000
+    description: Local gateway
+security:
+  - bearerAuth: []
+tags: []
+paths: {}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: EdDSA-signed access token issued by core-business-service and verified through its JWKS.
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Maximum number of items to return.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous page's `next_cursor`.
+      schema:
+        type: string
+  headers:
+    TraceId:
+      description: Trace ID of the request, for support and log correlation.
+      schema:
+        type: string
+        pattern: "^[0-9a-f]{32}$"
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem document with VeriTrace extensions.
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          example: about:blank
+        title:
+          type: string
+          example: Unprocessable Content
+        status:
+          type: integer
+          example: 422
+        code:
+          type: string
+          description: Stable machine-readable error code.
+          example: NOT_FOUND
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /api/v1/telemetry/incidents
+        trace_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        field:
+          type: string
+          example: gtin
+        code:
+          type: string
+          example: CHECK_DIGIT
+        message:
+          type: string
+    Position:
+      type: object
+      description: Device-reported WGS-84 position.
+      required: [latitude, longitude, accuracy_meters]
+      properties:
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        accuracy_meters:
+          type: number
+          minimum: 0
+  responses:
+    BadRequest:
+      description: The request is malformed or fails validation.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: Missing, invalid, or expired credentials.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Forbidden:
+      description: The caller may see the resource but may not perform the action.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: The resource does not exist or is not visible to the caller.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Conflict:
+      description: The request conflicts with the current state.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    UnprocessableContent:
+      description: The request is well-formed but violates a domain rule.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    InternalError:
+      description: Unexpected failure; details are in the service logs under the trace ID.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

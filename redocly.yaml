@@ -1,0 +1,8 @@
+extends:
+  - recommended
+
+rules:
+  # Paths are added story by story; an empty baseline is valid.
+  no-empty-servers: error
+  operation-4xx-response: error
+  info-license-strict: error
