@@ -5,8 +5,8 @@ info:
   summary: Cold-chain readings, incidents, and the real-time notification WebSocket.
   description: |
     Conventions, error codes, and the endpoint inventory are defined in
-    `platform-infrastructure/docs/contracts/rest-api.md`; the WebSocket protocol is defined in
-    `platform-infrastructure/docs/contracts/messaging.md`. Each endpoint's schema is added here together
+    `veritrace/docs/contracts/rest-api.md`; the WebSocket protocol is defined in
+    `veritrace/docs/contracts/messaging.md`. Each endpoint's schema is added here together
     with its implementation (contract first).
   license:
     name: MIT

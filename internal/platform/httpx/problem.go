@@ -9,7 +9,7 @@ import (
 )
 
 // Platform-level problem codes. Domain packages define their own codes; the catalog is in
-// platform-infrastructure/docs/contracts/rest-api.md.
+// veritrace/docs/contracts/rest-api.md.
 const (
 	CodeValidationFailed     = "VALIDATION_FAILED"
 	CodeUnauthenticated      = "UNAUTHENTICATED"
