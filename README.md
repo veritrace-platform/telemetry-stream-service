@@ -9,7 +9,7 @@ VeriTrace cold-chain telemetry. The service:
 - delivers real-time notifications (breaches, recalls, live readings) over WebSocket.
 
 Platform documentation, including the architecture, domain rules, messaging contracts, and ADRs, lives in
-[`platform-infrastructure/docs`](https://github.com/veritrace-platform/platform-infrastructure/tree/main/docs).
+[`veritrace/docs`](https://github.com/veritrace-platform/veritrace/tree/main/docs).
 The rules this service implements are in `docs/domain/cold-chain-monitoring.md` and
 `docs/adr/0012-cold-chain-detection-engine.md`.
 
