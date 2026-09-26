@@ -16,7 +16,8 @@ import (
 func TestMigrationsApplyAndRollBack(t *testing.T) {
 	ctx := context.Background()
 	pg := postgrestest.Start(t)
-	database := pg.CreateDatabase(t, "veritrace_telemetry", "veritrace_telemetry_owner", "veritrace_telemetry_app", "timescaledb")
+	database := pg.CreateDatabase(t, migrations.Database, migrations.Database+"_owner", migrations.Database+"_app",
+		migrations.RequiredExtensions...)
 
 	runner, err := migrate.Open(database.OwnerURL, migrations.FS, slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -64,10 +65,10 @@ func assertRuntimeRole(t *testing.T, appURL string) {
 	var bypassRLS, canUse, canCreate bool
 	err = db.QueryRow(`
 		SELECT r.rolbypassrls,
-		       has_schema_privilege(current_user, 'telemetry', 'USAGE'),
-		       has_schema_privilege(current_user, 'telemetry', 'CREATE')
+		       has_schema_privilege(current_user, $1, 'USAGE'),
+		       has_schema_privilege(current_user, $1, 'CREATE')
 		FROM pg_roles r
-		WHERE r.rolname = current_user`).Scan(&bypassRLS, &canUse, &canCreate)
+		WHERE r.rolname = current_user`, migrations.Schema).Scan(&bypassRLS, &canUse, &canCreate)
 	if err != nil {
 		t.Fatalf("query role privileges: %v", err)
 	}
@@ -75,14 +76,16 @@ func assertRuntimeRole(t *testing.T, appURL string) {
 		t.Error("runtime role must not bypass row-level security")
 	}
 	if !canUse {
-		t.Error("runtime role lacks USAGE on schema telemetry")
+		t.Errorf("runtime role lacks USAGE on schema %s", migrations.Schema)
 	}
 	if canCreate {
-		t.Error("runtime role must not create objects in schema telemetry")
+		t.Errorf("runtime role must not create objects in schema %s", migrations.Schema)
 	}
 
-	var timescaleVersion string
-	if err := db.QueryRow(`SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'`).Scan(&timescaleVersion); err != nil {
-		t.Errorf("timescaledb extension unavailable: %v", err)
+	for _, ext := range migrations.RequiredExtensions {
+		var version string
+		if err := db.QueryRow(`SELECT extversion FROM pg_extension WHERE extname = $1`, ext).Scan(&version); err != nil {
+			t.Errorf("extension %s unavailable: %v", ext, err)
+		}
 	}
 }

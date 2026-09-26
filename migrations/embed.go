@@ -6,6 +6,15 @@ package migrations
 
 import "embed"
 
+// Database is the database these migrations target.
+const Database = "veritrace_telemetry"
+
+// Schema is the application schema created by the first migration.
+const Schema = "telemetry"
+
+// RequiredExtensions are installed by infrastructure bootstrap before migrations run.
+var RequiredExtensions = []string{"timescaledb"}
+
 // FS contains every migration file.
 //
 //go:embed *.sql
