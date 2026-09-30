@@ -2,13 +2,33 @@ package config_test
 
 import (
 	"log/slog"
+	"os"
 	"testing"
 	"time"
+
+	"github.com/caarlos0/env/v11"
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/config"
 )
 
+// isolateEnv unsets every variable Config reads until the test ends, so results do not depend on the
+// caller's environment (make exports the local .env into test runs).
+func isolateEnv(t *testing.T) {
+	t.Helper()
+	params, err := env.GetFieldParams(&config.Config{})
+	if err != nil {
+		t.Fatalf("GetFieldParams() error = %v", err)
+	}
+	for _, p := range params {
+		t.Setenv(p.Key, "") // registers the restore of the original value
+		if err := os.Unsetenv(p.Key); err != nil {
+			t.Fatalf("unset %s: %v", p.Key, err)
+		}
+	}
+}
+
 func TestLoadDefaults(t *testing.T) {
+	isolateEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://app@localhost/db")
 
 	cfg, err := config.Load()
@@ -31,6 +51,7 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidValues(t *testing.T) {
+	isolateEnv(t)
 	t.Setenv("LOG_LEVEL", "verbose")
 
 	if _, err := config.Load(); err == nil {
