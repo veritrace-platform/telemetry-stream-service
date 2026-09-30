@@ -100,7 +100,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	apiServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger, registry),
+		Handler:           httpapi.NewRouter(logger, registry, httpapi.Mounts{}),
 		ReadHeaderTimeout: 5 * time.Second,
 		// No server-wide read or write timeout: WebSocket connections are long-lived and manage their own
 		// deadlines; REST handlers are bounded per request.

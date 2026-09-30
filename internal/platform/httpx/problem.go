@@ -23,6 +23,18 @@ const (
 	CodeServiceUnavailable   = "SERVICE_UNAVAILABLE"
 )
 
+// Field error codes shared by every endpoint. Domain packages add their own, such as the GS1 codes.
+const (
+	FieldRequired      = "REQUIRED"
+	FieldInvalidFormat = "INVALID_FORMAT"
+	FieldInvalidType   = "INVALID_TYPE"
+	FieldInvalidValue  = "INVALID_VALUE"
+	FieldTooShort      = "TOO_SHORT"
+	FieldTooLong       = "TOO_LONG"
+	FieldOutOfRange    = "OUT_OF_RANGE"
+	FieldUnknown       = "UNKNOWN_FIELD"
+)
+
 // ProblemContentType is the media type of every error response.
 const ProblemContentType = "application/problem+json"
 
@@ -54,6 +66,13 @@ func NewProblem(status int, code, detail string) Problem {
 		Code:   code,
 		Detail: detail,
 	}
+}
+
+// ValidationProblem builds the 400 VALIDATION_FAILED problem that lists every invalid field.
+func ValidationProblem(errs []FieldError) Problem {
+	p := NewProblem(http.StatusBadRequest, CodeValidationFailed, "request validation failed")
+	p.Errors = errs
+	return p
 }
 
 // WriteProblem writes p as the response, filling in the request path and trace ID.
