@@ -16,7 +16,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	if !slices.Equal(cfg.Components, []app.Component{app.Ingest}) ||
+	if !slices.Equal(cfg.Components, []app.Component{app.Ingest, app.Processor}) ||
 		!slices.Equal(cfg.KafkaBrokers, []string{"localhost:9092", "localhost:9093"}) ||
 		cfg.MQTT.Username != "telemetry-ingest" {
 		t.Errorf("LoadConfig() = %+v", cfg)
@@ -32,12 +32,11 @@ func TestValidate(t *testing.T) {
 		env  map[string]string
 		want []string // substrings of the error; none means valid
 	}{
+		{"processor only needs no MQTT", map[string]string{"COMPONENTS": "processor", "KAFKA_BROKERS": "kafka:19092"}, nil},
 		{"ingest needs MQTT", map[string]string{"COMPONENTS": "ingest", "KAFKA_BROKERS": "kafka:19092"},
 			[]string{"MQTT_URL", "MQTT_PASSWORD"}},
-		{"everything needs Kafka", map[string]string{"COMPONENTS": "ingest", "MQTT_URL": "mqtt://localhost:1883",
-			"MQTT_PASSWORD": "x"}, []string{"KAFKA_BROKERS"}},
-		{"unknown component", map[string]string{"COMPONENTS": "ingest,detector", "KAFKA_BROKERS": "kafka:19092",
-			"MQTT_URL": "mqtt://localhost:1883", "MQTT_PASSWORD": "x"},
+		{"everything needs Kafka", map[string]string{"COMPONENTS": "processor"}, []string{"KAFKA_BROKERS"}},
+		{"unknown component", map[string]string{"COMPONENTS": "processor,detector", "KAFKA_BROKERS": "kafka:19092"},
 			[]string{`unknown component "detector"`}},
 		{"no component", map[string]string{"COMPONENTS": " ", "KAFKA_BROKERS": "kafka:19092"},
 			[]string{"unknown component"}},

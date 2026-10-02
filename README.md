@@ -24,7 +24,7 @@ The rules this service implements are in `docs/domain/cold-chain-monitoring.md` 
 ```bash
 cp .env.example .env
 make migrate-up     # create or upgrade the schema (owner role)
-make run            # API and WebSocket on :8090, admin on :8091, plus the ingest component
+make run            # API and WebSocket on :8090, admin on :8091, plus the ingest and processor components
 ```
 
 `make run` needs Kafka and Mosquitto from the local environment. The IoT fleet simulator in
@@ -52,7 +52,7 @@ The binary exposes these subcommands:
 | `DATABASE_URL` | — | Runtime role connection (`veritrace_telemetry_app`) |
 | `MIGRATIONS_DATABASE_URL` | — | Owner role connection (`veritrace_telemetry_owner`), used by `migrate` only |
 | `SHUTDOWN_TIMEOUT` | `15s` | Graceful shutdown budget |
-| `COMPONENTS` | `ingest` | Components this instance runs (see below) |
+| `COMPONENTS` | `ingest,processor` | Components this instance runs (see below) |
 | `KAFKA_BROKERS` | — | Kafka bootstrap brokers, comma-separated |
 | `MQTT_URL` | — | MQTT broker, for example `mqtt://localhost:1883`; required by `ingest` |
 | `MQTT_USERNAME` | `telemetry-ingest` | MQTT user of the ingest component |
@@ -61,14 +61,16 @@ The binary exposes these subcommands:
 
 ## Components
 
-One binary runs the components of [ADR-0012](https://github.com/veritrace-platform/veritrace/blob/main/docs/adr/0012-cold-chain-detection-engine.md),
+One binary runs two components ([ADR-0012](https://github.com/veritrace-platform/veritrace/blob/main/docs/adr/0012-cold-chain-detection-engine.md)),
 and `COMPONENTS` selects the ones an instance runs. The API runs in every instance.
 
 | Component | Consumes | Produces | Work |
 | --- | --- | --- | --- |
 | `ingest` | MQTT `$share/telemetry-ingest/veritrace/v1/devices/+/telemetry` | `iot.telemetry.raw` | Validates device readings and forwards the accepted ones. A message is acknowledged to the broker after Kafka acknowledges its reading. |
+| `processor` | `iot.telemetry.raw` (group `telemetry-stream-service.processor`) | `iot.telemetry.dlq` | Stores readings in the `sensor_readings` hypertable; duplicates are stored once. Records it cannot store go to the dead-letter topic. |
 
-`/readyz` reports PostgreSQL, Kafka, and, with `ingest`, the MQTT subscription.
+Consumers commit offsets only after a batch is stored, so a restart may process a batch again, which is
+harmless. `/readyz` reports PostgreSQL, Kafka, and, with `ingest`, the MQTT subscription.
 
 ## Project layout
 
@@ -76,8 +78,8 @@ and `COMPONENTS` selects the ones an instance runs. The API runs in every instan
 cmd/telemetry-stream-service/   entry point
 internal/app/                   configuration and wiring of the components
 internal/httpapi/               REST router and /api/v1 route registration
-internal/stream/                Kafka producer; kafkatest: broker for tests
-internal/<domain>/              reading, ingest, ...
+internal/stream/                Kafka producer and consumer groups; kafkatest: broker for tests
+internal/<domain>/              reading, ingest, processor, ...
 internal/platform/              config, logging, trace context, HTTP plumbing, admin, database, migrations
 migrations/                     goose SQL migrations (embedded)
 api/openapi.yaml                REST contract

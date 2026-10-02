@@ -1,6 +1,6 @@
-// Package app assembles the telemetry service's background components (ADR-0012), starting with the ingest
-// component, which forwards device readings from MQTT to Kafka. COMPONENTS selects the ones an instance runs; the
-// serve command starts them next to the API.
+// Package app assembles the telemetry service's background components (ADR-0012): the ingest component, which
+// forwards device readings from MQTT to Kafka, and the processor component, which stores readings. COMPONENTS
+// selects the ones an instance runs; the serve command starts them next to the API.
 package app
 
 import (
@@ -18,6 +18,8 @@ import (
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/ingest"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/admin"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/processor"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/reading"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/stream"
 )
 
@@ -28,12 +30,14 @@ type Component string
 const (
 	// Ingest forwards device readings from MQTT to iot.telemetry.raw.
 	Ingest Component = "ingest"
+	// Processor stores readings from iot.telemetry.raw.
+	Processor Component = "processor"
 )
 
 // Config holds the settings of the telemetry service beyond the shared platform configuration.
 type Config struct {
 	// Components lists the components this instance runs.
-	Components []Component `env:"COMPONENTS" envSeparator:"," envDefault:"ingest"`
+	Components []Component `env:"COMPONENTS" envSeparator:"," envDefault:"ingest,processor"`
 	// KafkaBrokers are the bootstrap brokers, comma-separated.
 	KafkaBrokers []string `env:"KAFKA_BROKERS" envSeparator:","`
 	// MQTT is read when the ingest component runs.
@@ -58,10 +62,10 @@ func (c Config) Runs(component Component) bool {
 func (c Config) Validate() error {
 	var errs []error
 	if len(c.Components) == 0 {
-		errs = append(errs, errors.New("COMPONENTS must list ingest"))
+		errs = append(errs, errors.New("COMPONENTS must list ingest, processor, or both"))
 	}
 	for _, component := range c.Components {
-		if component != Ingest {
+		if component != Ingest && component != Processor {
 			errs = append(errs, fmt.Errorf("COMPONENTS: unknown component %q", component))
 		}
 	}
@@ -120,6 +124,22 @@ func NewWorkers(cfg Config, deps Dependencies) (*Workers, error) {
 		w.checks["mqtt"] = bridge.Ready
 	}
 
+	if cfg.Runs(Processor) {
+		logger := deps.Logger.With(slog.String("component", string(Processor)))
+		p := processor.New(reading.NewStore(deps.Pool), producer, logger, deps.Registerer, now)
+		readings, err := stream.NewConsumer(cfg.KafkaBrokers, processor.Group, []string{reading.RawTopic}, p.Handle,
+			logger)
+		if err != nil {
+			w.Close()
+			return nil, err
+		}
+		w.runs = append(w.runs, func(ctx context.Context) error {
+			readings.Run(ctx)
+			return nil
+		})
+		// The consumer leaves its group before the producer that writes its dead letters closes.
+		w.closes = append([]func(){readings.Close}, w.closes...)
+	}
 	return w, nil
 }
 
