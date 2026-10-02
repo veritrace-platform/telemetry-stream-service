@@ -38,6 +38,14 @@ jobs:
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -n 1
 
+  generated:
+    name: Generated code
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: sqlc
+        run: make generate-check
+
   vulnerabilities:
     name: Vulnerability scan
     runs-on: ubuntu-24.04

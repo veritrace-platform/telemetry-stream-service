@@ -11,6 +11,7 @@ VERSION               ?= $(shell git describe --tags --always --dirty 2>/dev/nul
 LDFLAGS               := -s -w -X $(MODULE)/internal/platform/buildinfo.Version=$(VERSION)
 GOLANGCI_LINT_VERSION := v2.14.0
 REDOCLY_CLI_VERSION   := 2.54.2
+SQLC_VERSION          := 1.31.1
 
 .PHONY: help
 help: ## List available targets
@@ -60,6 +61,14 @@ fmt: ## Format code
 .PHONY: vuln
 vuln: ## Scan dependencies for known vulnerabilities
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+.PHONY: generate
+generate: ## Generate Go code from the SQL queries (sqlc, in Docker)
+	docker run --rm -v "$(CURDIR):/src" -w /src -u "$$(id -u):$$(id -g)" sqlc/sqlc:$(SQLC_VERSION) generate
+
+.PHONY: generate-check
+generate-check: ## Fail when the generated query code is out of date
+	docker run --rm -v "$(CURDIR):/src" -w /src sqlc/sqlc:$(SQLC_VERSION) diff
 
 .PHONY: openapi-lint
 openapi-lint: ## Validate the OpenAPI document

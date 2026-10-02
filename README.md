@@ -24,8 +24,11 @@ The rules this service implements are in `docs/domain/cold-chain-monitoring.md` 
 ```bash
 cp .env.example .env
 make migrate-up     # create or upgrade the schema (owner role)
-make run            # API and WebSocket on :8090, admin on :8091
+make run            # API and WebSocket on :8090, admin on :8091, plus the ingest and processor components
 ```
+
+`make run` needs Kafka and Mosquitto from the local environment. The IoT fleet simulator in
+`platform-infrastructure` publishes readings to try it with.
 
 ## Commands
 
@@ -33,7 +36,7 @@ The binary exposes these subcommands:
 
 | Command | Purpose |
 | --- | --- |
-| `serve` | Run the API/WebSocket server and the admin server |
+| `serve` | Run the API/WebSocket server, the admin server, and the components in `COMPONENTS` |
 | `migrate up\|down\|status` | Manage the database schema |
 | `healthcheck` | Probe the admin server (used by container health checks) |
 | `version` | Print the build version |
@@ -49,25 +52,47 @@ The binary exposes these subcommands:
 | `DATABASE_URL` | — | Runtime role connection (`veritrace_telemetry_app`) |
 | `MIGRATIONS_DATABASE_URL` | — | Owner role connection (`veritrace_telemetry_owner`), used by `migrate` only |
 | `SHUTDOWN_TIMEOUT` | `15s` | Graceful shutdown budget |
+| `COMPONENTS` | `ingest,processor` | Components this instance runs (see below) |
+| `KAFKA_BROKERS` | — | Kafka bootstrap brokers, comma-separated |
+| `MQTT_URL` | — | MQTT broker, for example `mqtt://localhost:1883`; required by `ingest` |
+| `MQTT_USERNAME` | `telemetry-ingest` | MQTT user of the ingest component |
+| `MQTT_PASSWORD` | — | MQTT password; required by `ingest` |
+| `MQTT_CLIENT_ID` | `telemetry-ingest-<hostname>` | MQTT session identity; stable across restarts and unique per instance |
 
-Kafka, MQTT, and JWKS settings are added with the stories that use them (EP3).
+## Components
+
+One binary runs two components ([ADR-0012](https://github.com/veritrace-platform/veritrace/blob/main/docs/adr/0012-cold-chain-detection-engine.md)),
+and `COMPONENTS` selects the ones an instance runs. The API runs in every instance.
+
+| Component | Consumes | Produces | Work |
+| --- | --- | --- | --- |
+| `ingest` | MQTT `$share/telemetry-ingest/veritrace/v1/devices/+/telemetry` | `iot.telemetry.raw` | Validates device readings and forwards the accepted ones. A message is acknowledged to the broker after Kafka acknowledges its reading. |
+| `processor` | `iot.telemetry.raw` (group `telemetry-stream-service.processor`) | `iot.telemetry.dlq` | Stores readings in the `sensor_readings` hypertable; duplicates are stored once. Records it cannot store go to the dead-letter topic. |
+| `processor` | `shipment.events` (group `telemetry-stream-service.projection`) | — | Keeps `shipment_projection`: status, temperature bounds, participant tenants, and assigned driver of each shipment. |
+
+Consumers commit offsets only after a batch is stored, so a restart may process a batch again, which is
+harmless. `/readyz` reports PostgreSQL, Kafka, and, with `ingest`, the MQTT subscription.
 
 ## Project layout
 
 ```
-cmd/telemetry-stream-service/   entry point and wiring
+cmd/telemetry-stream-service/   entry point
+internal/app/                   configuration and wiring of the components
 internal/httpapi/               REST router and /api/v1 route registration
-internal/<domain>/              ingest, processor, detector, projection, hub (added per story)
+internal/stream/                Kafka producer and consumer groups; kafkatest: broker for tests
+internal/<domain>/              reading, ingest, processor, projection, ...; SQL in <domain>/queries
 internal/platform/              config, logging, trace context, HTTP plumbing, admin, database, migrations
 migrations/                     goose SQL migrations (embedded)
 api/openapi.yaml                REST contract
+sqlc.yaml                       query code generation
 ```
 
 ## Development
 
 ```bash
 make test               # unit tests
-make test-integration   # unit + integration tests (Docker)
+make test-integration   # unit + integration tests (Docker: TimescaleDB, Kafka, Mosquitto)
+make generate           # regenerate query code after editing SQL (sqlc, in Docker)
 make lint               # golangci-lint
 make openapi-lint       # validate api/openapi.yaml
 make help               # all targets
