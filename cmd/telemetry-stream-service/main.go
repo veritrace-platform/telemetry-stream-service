@@ -109,7 +109,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	workers, err := app.NewWorkers(appCfg, deps)
+	workers, err := app.NewWorkers(appCfg, deps, api.Hub)
 	if err != nil {
 		return err
 	}
@@ -129,6 +129,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		IdleTimeout: 120 * time.Second,
 		ErrorLog:    slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
+	// The server does not track hijacked WebSocket connections; the hub closes them with 1001 at shutdown.
+	apiServer.RegisterOnShutdown(api.Hub.Shutdown)
 	adminServer := &http.Server{
 		Addr:              cfg.AdminAddr,
 		Handler:           admin.NewHandler(readiness, registry),

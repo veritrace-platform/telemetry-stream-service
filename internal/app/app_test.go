@@ -13,13 +13,14 @@ func TestLoadConfigDefaults(t *testing.T) {
 	t.Setenv("MQTT_URL", "mqtt://localhost:1883")
 	t.Setenv("MQTT_PASSWORD", "ingest-dev")
 	t.Setenv("JWKS_URL", "http://localhost:8080/.well-known/jwks.json")
+	t.Setenv("WS_ALLOWED_ORIGINS", "https://app.example.com,http://localhost:3001")
 	cfg, err := app.LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 	if !slices.Equal(cfg.Components, []app.Component{app.Ingest, app.Processor}) ||
 		!slices.Equal(cfg.KafkaBrokers, []string{"localhost:9092", "localhost:9093"}) ||
-		cfg.MQTT.Username != "telemetry-ingest" {
+		cfg.MQTT.Username != "telemetry-ingest" || len(cfg.WSAllowedOrigins) != 2 {
 		t.Errorf("LoadConfig() = %+v", cfg)
 	}
 	if err := cfg.Validate(); err != nil {
@@ -47,10 +48,12 @@ func TestValidate(t *testing.T) {
 			[]string{"JWKS_URL"}},
 		{"JWKS that is not a URL", map[string]string{"COMPONENTS": "processor", "KAFKA_BROKERS": "kafka:19092",
 			"JWKS_URL": "core:8080/jwks"}, []string{"JWKS_URL"}},
+		{"origin with a path", map[string]string{"COMPONENTS": "processor", "KAFKA_BROKERS": "kafka:19092",
+			"WS_ALLOWED_ORIGINS": "https://app.example.com/login"}, []string{"WS_ALLOWED_ORIGINS"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, name := range []string{"COMPONENTS", "KAFKA_BROKERS", "MQTT_URL", "MQTT_PASSWORD"} {
+			for _, name := range []string{"COMPONENTS", "KAFKA_BROKERS", "MQTT_URL", "MQTT_PASSWORD", "WS_ALLOWED_ORIGINS"} {
 				t.Setenv(name, tt.env[name])
 			}
 			// Every case but the JWKS ones has a valid JWKS URL; "-" stands for none.

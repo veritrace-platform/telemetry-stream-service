@@ -21,6 +21,8 @@ type Mounts struct {
 	API []Routes
 	// WellKnown trees are served under /.well-known, for example jwks.json.
 	WellKnown []Routes
+	// WebSocket trees are served under /ws/v1 (rest-api.md §2).
+	WebSocket []Routes
 }
 
 // NewRouter returns the API handler with middleware applied to every request, including unmatched ones.
@@ -46,6 +48,13 @@ func NewRouter(logger *slog.Logger, registerer prometheus.Registerer, mounts Mou
 		r.Route("/.well-known", func(wellKnown chi.Router) {
 			for _, register := range mounts.WellKnown {
 				register(wellKnown)
+			}
+		})
+	}
+	if len(mounts.WebSocket) > 0 {
+		r.Route("/ws/v1", func(ws chi.Router) {
+			for _, register := range mounts.WebSocket {
+				register(ws)
 			}
 		})
 	}
