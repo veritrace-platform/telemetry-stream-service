@@ -4,7 +4,7 @@ VeriTrace cold-chain telemetry. The service:
 
 - ingests sensor readings over MQTT and forwards them to Kafka;
 - persists readings in TimescaleDB;
-- detects temperature breaches;
+- detects temperature breaches and records them as hashed incidents;
 - maintains a shipment projection from `shipment.events`;
 - delivers real-time notifications (breaches, recalls, live readings) over WebSocket.
 
@@ -67,11 +67,13 @@ and `COMPONENTS` selects the ones an instance runs. The API runs in every instan
 | Component | Consumes | Produces | Work |
 | --- | --- | --- | --- |
 | `ingest` | MQTT `$share/telemetry-ingest/veritrace/v1/devices/+/telemetry` | `iot.telemetry.raw` | Validates device readings and forwards the accepted ones. A message is acknowledged to the broker after Kafka acknowledges its reading. |
-| `processor` | `iot.telemetry.raw` (group `telemetry-stream-service.processor`) | `iot.telemetry.dlq` | Stores readings in the `sensor_readings` hypertable; duplicates are stored once. Records it cannot store go to the dead-letter topic. |
-| `processor` | `shipment.events` (group `telemetry-stream-service.projection`) | — | Keeps `shipment_projection`: status, temperature bounds, participant tenants, and assigned driver of each shipment. |
+| `processor` | `iot.telemetry.raw` (group `telemetry-stream-service.processor`) | `iot.telemetry.dlq`, `telemetry.incidents` | Stores readings in the `sensor_readings` hypertable; duplicates are stored once. Records it cannot store go to the dead-letter topic. Runs the breach rules per SSCC and records incidents with their hashes. |
+| `processor` | `shipment.events` (group `telemetry-stream-service.projection`) | `telemetry.incidents` | Keeps `shipment_projection`: status, temperature bounds, participant tenants, and assigned driver of each shipment. Resolves an open incident when its shipment is delivered, cancelled, or recalled. |
 
 Consumers commit offsets only after a batch is stored, so a restart may process a batch again, which is
-harmless. `/readyz` reports PostgreSQL, Kafka, and, with `ingest`, the MQTT subscription.
+harmless: incidents and their events derive their IDs from the episode, so a repeated event is recognizable.
+Episodes live in memory and are rebuilt from the database after a restart or a rebalance. `/readyz` reports
+PostgreSQL, Kafka, and, with `ingest`, the MQTT subscription.
 
 ## Project layout
 
@@ -80,7 +82,8 @@ cmd/telemetry-stream-service/   entry point
 internal/app/                   configuration and wiring of the components
 internal/httpapi/               REST router and /api/v1 route registration
 internal/stream/                Kafka producer and consumer groups; kafkatest: broker for tests
-internal/<domain>/              reading, ingest, processor, projection, ...; SQL in <domain>/queries
+internal/<domain>/              reading, ingest, processor, detector, incident, projection, ...;
+                                SQL in <domain>/queries
 internal/platform/              config, logging, trace context, HTTP plumbing, admin, database, migrations
 migrations/                     goose SQL migrations (embedded)
 api/openapi.yaml                REST contract

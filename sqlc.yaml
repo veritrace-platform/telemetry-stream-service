@@ -6,7 +6,7 @@ sql:
     schema: migrations
     queries: internal/projection/queries
     gen:
-      go:
+      go: &go
         package: queries
         out: internal/projection/queries
         sql_package: pgx/v5
@@ -38,3 +38,17 @@ sql:
             go_type:
               type: float64
               pointer: true
+  - engine: postgresql
+    schema: migrations
+    queries: internal/reading/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/reading/queries
+  - engine: postgresql
+    schema: migrations
+    queries: internal/incident/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/incident/queries

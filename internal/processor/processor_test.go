@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/veritrace-platform/telemetry-stream-service/internal/detector"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/processor"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/reading"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/stream"
@@ -43,6 +44,20 @@ func (s *fakeStore) Insert(_ context.Context, readings []reading.Reading) (int64
 	return int64(len(readings)), nil
 }
 
+// fakeDetector records the readings it evaluates, or fails with err.
+type fakeDetector struct {
+	err       error
+	evaluated []detector.Input
+}
+
+func (d *fakeDetector) Evaluate(_ context.Context, inputs []detector.Input) error {
+	if d.err != nil {
+		return d.err
+	}
+	d.evaluated = append(d.evaluated, inputs...)
+	return nil
+}
+
 type fakeProducer struct {
 	records []*kgo.Record
 }
@@ -71,8 +86,13 @@ func raw(t *testing.T, device string, offset time.Duration) *kgo.Record {
 }
 
 func newProcessor(store processor.ReadingStore, producer processor.Producer) (*processor.Processor, *prometheus.Registry) {
+	return newProcessorWith(store, &fakeDetector{}, producer)
+}
+
+func newProcessorWith(store processor.ReadingStore, d processor.Detector, producer processor.Producer,
+) (*processor.Processor, *prometheus.Registry) {
 	registry := prometheus.NewRegistry()
-	return processor.New(store, producer, slog.New(slog.DiscardHandler), registry, func() time.Time { return now }),
+	return processor.New(store, d, producer, slog.New(slog.DiscardHandler), registry, func() time.Time { return now }),
 		registry
 }
 
@@ -153,6 +173,36 @@ func TestHandleRetriesRefusedReadingsAloneThenDeadLetters(t *testing.T) {
 	}
 	if got := deadLettered(t, registry, "storage_refused"); got != 1 {
 		t.Errorf("storage dead letters = %v, want 1", got)
+	}
+}
+
+func TestHandleEvaluatesTheStoredReadings(t *testing.T) {
+	store, d, producer := &fakeStore{refuse: map[string]bool{"BAD": true}}, &fakeDetector{}, &fakeProducer{}
+	p, _ := newProcessorWith(store, d, producer)
+	invalid := raw(t, "D3", 0)
+	invalid.Value = []byte(`{}`)
+	records := []*kgo.Record{raw(t, "D1", 0), raw(t, "BAD", 0), invalid, raw(t, "D2", 5*time.Second)}
+	if err := p.Handle(t.Context(), records); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(d.evaluated) != 2 || d.evaluated[0].Reading.DeviceID != "D1" || d.evaluated[1].Reading.DeviceID != "D2" {
+		t.Fatalf("evaluated = %+v, want the readings of D1 and D2", d.evaluated)
+	}
+	if d.evaluated[0].Traceparent != stream.Header(records[0], stream.HeaderTraceparent) {
+		t.Errorf("traceparent = %q", d.evaluated[0].Traceparent)
+	}
+}
+
+func TestHandleFailsTheBatchWhenDetectionFails(t *testing.T) {
+	d, producer := &fakeDetector{err: errors.New("database unavailable")}, &fakeProducer{}
+	p, _ := newProcessorWith(&fakeStore{}, d, producer)
+	invalid := raw(t, "D1", 0)
+	invalid.Value = []byte(`{}`)
+	if err := p.Handle(t.Context(), []*kgo.Record{raw(t, "D1", 0), invalid}); err == nil {
+		t.Fatal("Handle() succeeded")
+	}
+	if len(producer.records) != 0 {
+		t.Errorf("dead letters = %d, want none until the batch succeeds", len(producer.records))
 	}
 }
 

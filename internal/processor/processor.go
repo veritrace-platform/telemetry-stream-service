@@ -1,5 +1,6 @@
 // Package processor runs the processor role of ADR-0012 on Kafka topic iot.telemetry.raw: it stores each batch of
-// readings, and sets aside on the dead-letter topic the records that it cannot store.
+// readings, runs them through breach detection, and sets aside on the dead-letter topic the records that it
+// cannot store.
 package processor
 
 import (
@@ -13,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/veritrace-platform/telemetry-stream-service/internal/detector"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/pgerror"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/tracecontext"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/reading"
@@ -36,6 +38,11 @@ type ReadingStore interface {
 	Insert(ctx context.Context, readings []reading.Reading) (int64, error)
 }
 
+// Detector evaluates stored readings against the breach rules, as *detector.Detector does.
+type Detector interface {
+	Evaluate(ctx context.Context, inputs []detector.Input) error
+}
+
 // Producer writes records and waits for them to be acknowledged, as *kgo.Client does.
 type Producer interface {
 	ProduceSync(ctx context.Context, records ...*kgo.Record) kgo.ProduceResults
@@ -44,6 +51,7 @@ type Producer interface {
 // Processor handles batches of raw readings.
 type Processor struct {
 	readings     ReadingStore
+	detector     Detector
 	producer     Producer
 	logger       *slog.Logger
 	now          func() time.Time
@@ -51,15 +59,17 @@ type Processor struct {
 }
 
 // New returns a processor. Its metrics are registered with registerer.
-func New(readings ReadingStore, producer Producer, logger *slog.Logger, registerer prometheus.Registerer,
-	now func() time.Time,
+func New(readings ReadingStore, detector Detector, producer Producer, logger *slog.Logger,
+	registerer prometheus.Registerer, now func() time.Time,
 ) *Processor {
 	deadLettered := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "veritrace_telemetry_readings_dead_lettered_total",
 		Help: "Raw readings sent to the dead-letter topic, by reason.",
 	}, []string{"reason"})
 	registerer.MustRegister(deadLettered)
-	return &Processor{readings: readings, producer: producer, logger: logger, now: now, deadLettered: deadLettered}
+	return &Processor{
+		readings: readings, detector: detector, producer: producer, logger: logger, now: now, deadLettered: deadLettered,
+	}
 }
 
 // pending is a valid reading and the record it came from.
@@ -68,9 +78,10 @@ type pending struct {
 	reading reading.Reading
 }
 
-// Handle stores a batch. A record that is not a valid reading is dead-lettered at once; the same check would fail
-// again. A reading that the database refuses is tried alone up to three more times and then dead-lettered. Any
-// other failure, such as an unreachable database, fails the batch, which the consumer retries.
+// Handle stores a batch and evaluates the stored readings. A record that is not a valid reading is dead-lettered
+// at once; the same check would fail again. A reading that the database refuses is tried alone up to three more
+// times and then dead-lettered. Any other failure, such as an unreachable database, fails the batch, which the
+// consumer retries.
 func (p *Processor) Handle(ctx context.Context, records []*kgo.Record) error {
 	var (
 		valid []pending
@@ -85,11 +96,19 @@ func (p *Processor) Handle(ctx context.Context, records []*kgo.Record) error {
 		valid = append(valid, pending{record: rec, reading: r})
 	}
 
-	refused, err := p.store(ctx, valid)
+	stored, refused, err := p.store(ctx, valid)
 	if err != nil {
 		return err
 	}
 	dead = append(dead, refused...)
+
+	inputs := make([]detector.Input, len(stored))
+	for i, s := range stored {
+		inputs[i] = detector.Input{Reading: s.reading, Traceparent: stream.Header(s.record, stream.HeaderTraceparent)}
+	}
+	if err := p.detector.Evaluate(ctx, inputs); err != nil {
+		return fmt.Errorf("detect breaches: %w", err)
+	}
 
 	if len(dead) > 0 {
 		if err := p.producer.ProduceSync(ctx, dead...).FirstErr(); err != nil {
@@ -99,9 +118,9 @@ func (p *Processor) Handle(ctx context.Context, records []*kgo.Record) error {
 	return nil
 }
 
-// store inserts the readings in one statement. If the database refuses the batch, each reading is inserted alone
-// to find the ones it refuses, which are returned as dead letters.
-func (p *Processor) store(ctx context.Context, batch []pending) ([]*kgo.Record, error) {
+// store inserts the readings in one statement and returns those stored. If the database refuses the batch, each
+// reading is inserted alone to find the ones it refuses, which are returned as dead letters.
+func (p *Processor) store(ctx context.Context, batch []pending) ([]pending, []*kgo.Record, error) {
 	readings := make([]reading.Reading, len(batch))
 	for i, b := range batch {
 		readings[i] = b.reading
@@ -109,13 +128,16 @@ func (p *Processor) store(ctx context.Context, batch []pending) ([]*kgo.Record, 
 	n, err := p.readings.Insert(ctx, readings)
 	if err == nil {
 		p.logger.DebugContext(ctx, "stored readings", slog.Int("received", len(readings)), slog.Int64("new", n))
-		return nil, nil
+		return batch, nil, nil
 	}
 	if !pgerror.IsDataError(err) {
-		return nil, fmt.Errorf("store readings: %w", err)
+		return nil, nil, fmt.Errorf("store readings: %w", err)
 	}
 
-	var dead []*kgo.Record
+	var (
+		stored []pending
+		dead   []*kgo.Record
+	)
 	for _, b := range batch {
 		var err error
 		for range 1 + retries {
@@ -125,13 +147,14 @@ func (p *Processor) store(ctx context.Context, batch []pending) ([]*kgo.Record, 
 		}
 		switch {
 		case err == nil:
+			stored = append(stored, b)
 		case pgerror.IsDataError(err):
 			dead = append(dead, p.deadLetter(ctx, b.record, err))
 		default:
-			return nil, fmt.Errorf("store reading: %w", err)
+			return nil, nil, fmt.Errorf("store reading: %w", err)
 		}
 	}
-	return dead, nil
+	return stored, dead, nil
 }
 
 // deadLetter wraps a failed record as messaging.md §4 defines, counts it, and logs it.

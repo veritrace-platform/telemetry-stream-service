@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -37,13 +38,15 @@ type event struct {
 	EventID      string          `json:"event_id"`
 	EventType    string          `json:"event_type"`
 	EventVersion int             `json:"event_version"`
+	OccurredAt   string          `json:"occurred_at"`
 	Subject      subject         `json:"subject"`
 	Sequence     int32           `json:"sequence"`
 	Data         json.RawMessage `json:"data"`
 
-	created *createdData
-	joined  *participant
-	driver  *driverData
+	occurredAt time.Time
+	created    *createdData
+	joined     *participant
+	driver     *driverData
 }
 
 type subject struct {
@@ -93,6 +96,11 @@ func decode(value []byte) (event, error) {
 	case e.Sequence < 1:
 		return event{}, fmt.Errorf("sequence %d is not positive", e.Sequence)
 	}
+	occurredAt, err := time.Parse(time.RFC3339Nano, e.OccurredAt)
+	if err != nil {
+		return event{}, fmt.Errorf("occurred_at %q is not a timestamp", e.OccurredAt)
+	}
+	e.occurredAt = occurredAt
 
 	var missing string
 	switch e.EventType {

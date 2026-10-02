@@ -1,6 +1,7 @@
 // Package app assembles the telemetry service's background components (ADR-0012): the ingest component, which
-// forwards device readings from MQTT to Kafka, and the processor component, which stores readings and keeps the
-// shipment projection. COMPONENTS selects the ones an instance runs; the serve command starts them next to the API.
+// forwards device readings from MQTT to Kafka, and the processor component, which stores readings, detects
+// breaches, and keeps the shipment projection. COMPONENTS selects the ones an instance runs; the serve command
+// starts them next to the API.
 package app
 
 import (
@@ -15,7 +16,9 @@ import (
 	"github.com/caarlos0/env/v11"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/veritrace-platform/telemetry-stream-service/internal/detector"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/ingest"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/admin"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/processor"
@@ -31,7 +34,7 @@ type Component string
 const (
 	// Ingest forwards device readings from MQTT to iot.telemetry.raw.
 	Ingest Component = "ingest"
-	// Processor stores readings from iot.telemetry.raw and projects shipment.events.
+	// Processor stores and evaluates readings from iot.telemetry.raw and projects shipment.events.
 	Processor Component = "processor"
 )
 
@@ -127,14 +130,18 @@ func NewWorkers(cfg Config, deps Dependencies) (*Workers, error) {
 
 	if cfg.Runs(Processor) {
 		logger := deps.Logger.With(slog.String("component", string(Processor)))
-		p := processor.New(reading.NewStore(deps.Pool), producer, logger, deps.Registerer, now)
+		breaches := detector.New(deps.Pool, producer, logger, deps.Registerer, now)
+		p := processor.New(reading.NewStore(deps.Pool), breaches, producer, logger, deps.Registerer, now)
+		// Episodes belong to the partitions that hold their SSCC; after a rebalance they are rebuilt from the
+		// database.
+		reset := func(context.Context, *kgo.Client, map[string][]int32) { breaches.Reset() }
 		readings, err := stream.NewConsumer(cfg.KafkaBrokers, processor.Group, []string{reading.RawTopic}, p.Handle,
-			logger)
+			logger, kgo.OnPartitionsRevoked(reset), kgo.OnPartitionsLost(reset))
 		if err != nil {
 			w.Close()
 			return nil, err
 		}
-		projector := projection.NewProjector(deps.Pool, logger)
+		projector := projection.NewProjector(deps.Pool, producer, logger)
 		shipments, err := stream.NewConsumer(cfg.KafkaBrokers, projection.Group, []string{projection.Topic},
 			projector.Handle, logger)
 		if err != nil {
