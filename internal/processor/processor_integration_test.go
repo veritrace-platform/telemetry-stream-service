@@ -4,6 +4,7 @@ package processor_test
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"testing"
@@ -14,6 +15,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/dbtest"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/detector"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/incident"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/processor"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/reading"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/stream"
@@ -38,8 +41,9 @@ func TestProcessorConsumesRawReadings(t *testing.T) {
 		t.Fatalf("produce: %v", err)
 	}
 
-	p := processor.New(reading.NewStore(db.App), producer, slog.New(slog.DiscardHandler), prometheus.NewRegistry(),
-		time.Now)
+	registry := prometheus.NewRegistry()
+	breaches := detector.New(db.App, producer, slog.New(slog.DiscardHandler), registry, time.Now)
+	p := processor.New(reading.NewStore(db.App), breaches, producer, slog.New(slog.DiscardHandler), registry, time.Now)
 	consumer, err := stream.NewConsumer(brokers, processor.Group, []string{reading.RawTopic}, p.Handle,
 		slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -81,5 +85,64 @@ func TestProcessorConsumesRawReadings(t *testing.T) {
 			t.Fatalf("group lag = %d after processing", lag[processor.Group].Lag.Total())
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// TestProcessorDetectsBreaches runs a sustained excursion through Kafka: the processor stores the readings, confirms
+// the breach, and produces cold_chain.breach_confirmed.
+func TestProcessorDetectsBreaches(t *testing.T) {
+	db := dbtest.Start(t)
+	brokers := kafkatest.Start(t, 6, reading.RawTopic, reading.DeadLetterTopic, incident.Topic)
+	producer, err := stream.NewProducer(brokers)
+	if err != nil {
+		t.Fatalf("NewProducer() error = %v", err)
+	}
+	t.Cleanup(producer.Close)
+	const sscc = "089300010000000018"
+	db.Project(t, dbtest.Shipment{SSCC: sscc})
+
+	start := time.Now().UTC().Add(-time.Minute).Truncate(time.Millisecond)
+	var records []*kgo.Record
+	for s := 0; s <= 30; s += 5 {
+		r := reading.Reading{
+			DeviceID: "REEFER-0001", SSCC: sscc, RecordedAt: start.Add(time.Duration(s) * time.Second),
+			ReceivedAt: start.Add(time.Duration(s) * time.Second), TemperatureCelsius: 9.5, Latitude: 10.87, Longitude: 106.8,
+		}
+		value, _ := json.Marshal(r)
+		records = append(records, &kgo.Record{Topic: reading.RawTopic, Key: []byte(sscc), Value: value,
+			Headers: stream.JSONHeaders("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")})
+	}
+	if err := producer.ProduceSync(t.Context(), records...).FirstErr(); err != nil {
+		t.Fatalf("produce: %v", err)
+	}
+
+	registry := prometheus.NewRegistry()
+	breaches := detector.New(db.App, producer, slog.New(slog.DiscardHandler), registry, time.Now)
+	p := processor.New(reading.NewStore(db.App), breaches, producer, slog.New(slog.DiscardHandler), registry, time.Now)
+	consumer, err := stream.NewConsumer(brokers, processor.Group, []string{reading.RawTopic}, p.Handle,
+		slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("NewConsumer() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Go(func() { consumer.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		wg.Wait()
+		consumer.Close()
+	})
+
+	event := kafkatest.Consume(t, brokers, incident.Topic, 1)[0]
+	e, err := incident.DecodeEvent(event.Value)
+	if err != nil || e.EventType != incident.TypeBreachConfirmed || string(event.Key) != sscc {
+		t.Fatalf("event = %+v, %v", e, err)
+	}
+	// The event continues the trace of the confirming reading.
+	if tp := stream.Header(event, stream.HeaderTraceparent); len(tp) != 55 || tp[3:35] != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Errorf("traceparent = %q", tp)
+	}
+	if n := db.Count(t, `SELECT count(*) FROM telemetry.cold_chain_incidents WHERE sscc = $1 AND ended_at IS NULL`, sscc); n != 1 {
+		t.Errorf("open incidents = %d, want 1", n)
 	}
 }

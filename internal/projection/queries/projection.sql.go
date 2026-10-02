@@ -130,6 +130,47 @@ func (q *Queries) GetShipment(ctx context.Context, sscc string) (TelemetryShipme
 	return i, err
 }
 
+const getShipments = `-- name: GetShipments :many
+SELECT sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driver_id, status, gtin, product_name,
+       lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence, updated_at
+FROM telemetry.shipment_projection
+WHERE sscc = ANY (CAST($1::text[] AS bpchar[]))
+`
+
+func (q *Queries) GetShipments(ctx context.Context, ssccs []string) ([]TelemetryShipmentProjection, error) {
+	rows, err := q.db.Query(ctx, getShipments, ssccs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TelemetryShipmentProjection
+	for rows.Next() {
+		var i TelemetryShipmentProjection
+		if err := rows.Scan(
+			&i.Sscc,
+			&i.ShipmentID,
+			&i.OwnerTenantID,
+			&i.ParticipantTenantIds,
+			&i.AssignedDriverID,
+			&i.Status,
+			&i.Gtin,
+			&i.ProductName,
+			&i.LotNumber,
+			&i.MinTempCelsius,
+			&i.MaxTempCelsius,
+			&i.LastEventSequence,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lastEventSequence = `-- name: LastEventSequence :one
 SELECT last_event_sequence
 FROM telemetry.shipment_projection

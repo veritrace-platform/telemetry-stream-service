@@ -45,6 +45,7 @@ func TestMountedRoutesAreServedUnderTheirPrefix(t *testing.T) {
 	router := httpapi.NewRouter(slog.New(slog.DiscardHandler), prometheus.NewRegistry(), httpapi.Mounts{
 		API:       []httpapi.Routes{func(r chi.Router) { r.Get("/ping", noContent) }},
 		WellKnown: []httpapi.Routes{func(r chi.Router) { r.Get("/jwks.json", noContent) }},
+		WebSocket: []httpapi.Routes{func(r chi.Router) { r.Get("/notifications", noContent) }},
 	})
 
 	tests := []struct {
@@ -55,6 +56,8 @@ func TestMountedRoutesAreServedUnderTheirPrefix(t *testing.T) {
 		{http.MethodPost, "/api/v1/ping", http.StatusMethodNotAllowed},
 		{http.MethodGet, "/.well-known/jwks.json", http.StatusNoContent},
 		{http.MethodGet, "/.well-known/other", http.StatusNotFound},
+		{http.MethodGet, "/ws/v1/notifications", http.StatusNoContent},
+		{http.MethodGet, "/ws/v1/other", http.StatusNotFound},
 		{http.MethodGet, "/ping", http.StatusNotFound},
 	}
 	for _, tt := range tests {

@@ -20,7 +20,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/app"
-	"github.com/veritrace-platform/telemetry-stream-service/internal/httpapi"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/admin"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/buildinfo"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/config"
@@ -105,7 +104,12 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 
-	workers, err := app.NewWorkers(appCfg, app.Dependencies{Logger: logger, Registerer: registry, Pool: pool})
+	deps := app.Dependencies{Logger: logger, Registerer: registry, Pool: pool}
+	api, err := app.NewAPI(appCfg, deps)
+	if err != nil {
+		return err
+	}
+	workers, err := app.NewWorkers(appCfg, deps, api.Hub)
 	if err != nil {
 		return err
 	}
@@ -113,17 +117,20 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	checks := map[string]admin.Check{"postgres": pool.Ping}
 	maps.Copy(checks, workers.Checks())
+	maps.Copy(checks, api.Checks)
 	readiness := admin.NewReadiness(checks, 2*time.Second)
 
 	apiServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger, registry, httpapi.Mounts{}),
+		Handler:           api.Handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		// No server-wide read or write timeout: WebSocket connections are long-lived and manage their own
 		// deadlines; REST handlers are bounded per request.
 		IdleTimeout: 120 * time.Second,
 		ErrorLog:    slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
+	// The server does not track hijacked WebSocket connections; the hub closes them with 1001 at shutdown.
+	apiServer.RegisterOnShutdown(api.Hub.Shutdown)
 	adminServer := &http.Server{
 		Addr:              cfg.AdminAddr,
 		Handler:           admin.NewHandler(readiness, registry),

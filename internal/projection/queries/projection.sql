@@ -37,3 +37,9 @@ SELECT sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driv
        lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence, updated_at
 FROM telemetry.shipment_projection
 WHERE sscc = @sscc;
+
+-- name: GetShipments :many
+SELECT sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driver_id, status, gtin, product_name,
+       lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence, updated_at
+FROM telemetry.shipment_projection
+WHERE sscc = ANY (CAST(sqlc.arg(ssccs)::text[] AS bpchar[]));

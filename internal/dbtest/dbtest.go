@@ -4,8 +4,10 @@ package dbtest
 
 import (
 	"log/slog"
+	"slices"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/migrate"
@@ -63,4 +65,48 @@ func (d *Database) Count(t testing.TB, query string, args ...any) int {
 		t.Fatalf("%s: %v", query, err)
 	}
 	return n
+}
+
+// Shipment is a projected shipment for fixtures. Zero fields take defaults: a new shipment ID, a new owner tenant
+// that is the only participant, status IN_TRANSIT, and bounds of 2 to 8 °C.
+type Shipment struct {
+	SSCC             string
+	ShipmentID       uuid.UUID
+	OwnerTenantID    uuid.UUID
+	Participants     []uuid.UUID
+	AssignedDriverID *uuid.UUID
+	Status           string
+	MinTempCelsius   float64
+	MaxTempCelsius   float64
+}
+
+// Project inserts a shipment into the projection as the owner and returns it with its defaults filled in.
+func (d *Database) Project(t testing.TB, s Shipment) Shipment {
+	t.Helper()
+	if s.ShipmentID == uuid.Nil {
+		s.ShipmentID = uuid.New()
+	}
+	if s.OwnerTenantID == uuid.Nil {
+		s.OwnerTenantID = uuid.New()
+	}
+	if !slices.Contains(s.Participants, s.OwnerTenantID) {
+		s.Participants = append([]uuid.UUID{s.OwnerTenantID}, s.Participants...)
+	}
+	if s.Status == "" {
+		s.Status = "IN_TRANSIT"
+	}
+	if s.MinTempCelsius == 0 && s.MaxTempCelsius == 0 {
+		s.MinTempCelsius, s.MaxTempCelsius = 2, 8
+	}
+	_, err := d.Owner.Exec(t.Context(), `
+		INSERT INTO telemetry.shipment_projection (
+			sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driver_id, status, gtin, product_name,
+			lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence)
+		VALUES ($1, $2, $3, $4, $5, $6, '08930001000018', 'Fresh milk 1 L', 'L2026-09-30A', $7, $8, 1)`,
+		s.SSCC, s.ShipmentID, s.OwnerTenantID, s.Participants, s.AssignedDriverID, s.Status, s.MinTempCelsius,
+		s.MaxTempCelsius)
+	if err != nil {
+		t.Fatalf("project shipment %s: %v", s.SSCC, err)
+	}
+	return s
 }
