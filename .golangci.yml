@@ -26,6 +26,10 @@ linters:
     - unparam
     - usestdlibvars
   settings:
+    misspell:
+      # The MQTT broker.
+      ignore-rules:
+        - mosquitto
     revive:
       rules:
         - name: exported
