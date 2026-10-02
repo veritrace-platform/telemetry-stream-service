@@ -1,0 +1,154 @@
+{
+  "description": "Hash chain of one shipment event log (docs/contracts/messaging.md section 2.1). Each envelope is the message published on shipment.events. event_hash is the SHA-256, in lowercase hex, of hash_input: the RFC 8785 canonical JSON of {event_id, event_type, event_version, occurred_at, subject, actor, sequence, prev_event_hash, data}. The first event links to zero_hash, and each later one to the event_hash before it. Timestamps always carry six fractional digits.",
+  "zero_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "events": [
+    {
+      "envelope": {
+        "event_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7db1",
+        "event_type": "shipment.created",
+        "event_version": 1,
+        "occurred_at": "2026-10-02T08:00:00.000000Z",
+        "producer": "core-business-service",
+        "subject": {
+          "shipment_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0",
+          "sscc": "089300010000000018",
+          "status": "CREATED"
+        },
+        "actor": {
+          "tenant_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e",
+          "user_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90"
+        },
+        "sequence": 1,
+        "prev_event_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "event_hash": "2a2f0bba5a20af4ea2697aff49f5405ff74905b2c7fc47322cfddad67c0b6846",
+        "data": {
+          "owner_tenant_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e",
+          "lot_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95",
+          "gtin": "08930001000018",
+          "product_name": "Fresh milk 1 L",
+          "lot_number": "L2026-09-30A",
+          "expiration_date": "2026-10-14",
+          "quantity": 480,
+          "min_temp_celsius": 2,
+          "max_temp_celsius": 6,
+          "origin": {
+            "location_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d92",
+            "gln": "8930001000025",
+            "name": "Tan Thuan cold store"
+          },
+          "destination": {
+            "location_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da4",
+            "gln": "8934567000017",
+            "name": "District 7 store hub"
+          },
+          "participants": [
+            {
+              "tenant_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e",
+              "role": "OWNER"
+            },
+            {
+              "tenant_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d93",
+              "role": "CARRIER"
+            },
+            {
+              "tenant_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da3",
+              "role": "CONSIGNEE"
+            }
+          ],
+          "assigned_driver_id": null
+        }
+      },
+      "hash_input": "{\"actor\":{\"tenant_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e\",\"user_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90\"},\"data\":{\"assigned_driver_id\":null,\"destination\":{\"gln\":\"8934567000017\",\"location_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da4\",\"name\":\"District 7 store hub\"},\"expiration_date\":\"2026-10-14\",\"gtin\":\"08930001000018\",\"lot_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95\",\"lot_number\":\"L2026-09-30A\",\"max_temp_celsius\":6,\"min_temp_celsius\":2,\"origin\":{\"gln\":\"8930001000025\",\"location_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d92\",\"name\":\"Tan Thuan cold store\"},\"owner_tenant_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e\",\"participants\":[{\"role\":\"OWNER\",\"tenant_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e\"},{\"role\":\"CARRIER\",\"tenant_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d93\"},{\"role\":\"CONSIGNEE\",\"tenant_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da3\"}],\"product_name\":\"Fresh milk 1 L\",\"quantity\":480},\"event_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7db1\",\"event_type\":\"shipment.created\",\"event_version\":1,\"occurred_at\":\"2026-10-02T08:00:00.000000Z\",\"prev_event_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":1,\"subject\":{\"shipment_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0\",\"sscc\":\"089300010000000018\",\"status\":\"CREATED\"}}",
+      "event_hash": "2a2f0bba5a20af4ea2697aff49f5405ff74905b2c7fc47322cfddad67c0b6846"
+    },
+    {
+      "envelope": {
+        "event_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7db2",
+        "event_type": "shipment.driver_assigned",
+        "event_version": 1,
+        "occurred_at": "2026-10-02T08:05:30.250000Z",
+        "producer": "core-business-service",
+        "subject": {
+          "shipment_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0",
+          "sscc": "089300010000000018",
+          "status": "CREATED"
+        },
+        "actor": {
+          "tenant_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d93",
+          "user_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da1"
+        },
+        "sequence": 2,
+        "prev_event_hash": "2a2f0bba5a20af4ea2697aff49f5405ff74905b2c7fc47322cfddad67c0b6846",
+        "event_hash": "c27b8157a629c634d1019d534ebcb28a67e1c406e0e2b261b05ae76f46796328",
+        "data": {
+          "driver_user_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da2"
+        }
+      },
+      "hash_input": "{\"actor\":{\"tenant_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d93\",\"user_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da1\"},\"data\":{\"driver_user_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da2\"},\"event_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7db2\",\"event_type\":\"shipment.driver_assigned\",\"event_version\":1,\"occurred_at\":\"2026-10-02T08:05:30.250000Z\",\"prev_event_hash\":\"2a2f0bba5a20af4ea2697aff49f5405ff74905b2c7fc47322cfddad67c0b6846\",\"sequence\":2,\"subject\":{\"shipment_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0\",\"sscc\":\"089300010000000018\",\"status\":\"CREATED\"}}",
+      "event_hash": "c27b8157a629c634d1019d534ebcb28a67e1c406e0e2b261b05ae76f46796328"
+    },
+    {
+      "envelope": {
+        "event_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7db3",
+        "event_type": "shipment.pickup_confirmed",
+        "event_version": 1,
+        "occurred_at": "2026-10-02T08:31:12.123456Z",
+        "producer": "core-business-service",
+        "subject": {
+          "shipment_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0",
+          "sscc": "089300010000000018",
+          "status": "IN_TRANSIT"
+        },
+        "actor": {
+          "tenant_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d93",
+          "user_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da2"
+        },
+        "sequence": 3,
+        "prev_event_hash": "c27b8157a629c634d1019d534ebcb28a67e1c406e0e2b261b05ae76f46796328",
+        "event_hash": "b950012d685ecf3e7f7ccf416581645cd8a0e61070e08d7c11fc1448d9212435",
+        "data": {
+          "driver_user_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da2",
+          "position": {
+            "latitude": 10.762701,
+            "longitude": 106.742912,
+            "accuracy_meters": 12
+          },
+          "distance_meters": 15
+        }
+      },
+      "hash_input": "{\"actor\":{\"tenant_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d93\",\"user_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da2\"},\"data\":{\"distance_meters\":15,\"driver_user_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da2\",\"position\":{\"accuracy_meters\":12,\"latitude\":10.762701,\"longitude\":106.742912}},\"event_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7db3\",\"event_type\":\"shipment.pickup_confirmed\",\"event_version\":1,\"occurred_at\":\"2026-10-02T08:31:12.123456Z\",\"prev_event_hash\":\"c27b8157a629c634d1019d534ebcb28a67e1c406e0e2b261b05ae76f46796328\",\"sequence\":3,\"subject\":{\"shipment_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0\",\"sscc\":\"089300010000000018\",\"status\":\"IN_TRANSIT\"}}",
+      "event_hash": "b950012d685ecf3e7f7ccf416581645cd8a0e61070e08d7c11fc1448d9212435"
+    },
+    {
+      "envelope": {
+        "event_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7db4",
+        "event_type": "shipment.recalled",
+        "event_version": 1,
+        "occurred_at": "2026-10-02T09:00:00.000001Z",
+        "producer": "core-business-service",
+        "subject": {
+          "shipment_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0",
+          "sscc": "089300010000000018",
+          "status": "RECALLED"
+        },
+        "actor": {
+          "tenant_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e",
+          "user_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90"
+        },
+        "sequence": 4,
+        "prev_event_hash": "b950012d685ecf3e7f7ccf416581645cd8a0e61070e08d7c11fc1448d9212435",
+        "event_hash": "67859fb957efe4ab75b4c5efdf301af7d3844a60efe2108184898d420d09e510",
+        "data": {
+          "recall_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7dc1",
+          "lot_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95",
+          "gtin": "08930001000018",
+          "lot_number": "L2026-09-30A",
+          "reason": "Supplier reported \"possible\" contamination\nof batch L2026-09-30A",
+          "previous_status": "IN_TRANSIT"
+        }
+      },
+      "hash_input": "{\"actor\":{\"tenant_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e\",\"user_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90\"},\"data\":{\"gtin\":\"08930001000018\",\"lot_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95\",\"lot_number\":\"L2026-09-30A\",\"previous_status\":\"IN_TRANSIT\",\"reason\":\"Supplier reported \\\"possible\\\" contamination\\nof batch L2026-09-30A\",\"recall_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7dc1\"},\"event_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7db4\",\"event_type\":\"shipment.recalled\",\"event_version\":1,\"occurred_at\":\"2026-10-02T09:00:00.000001Z\",\"prev_event_hash\":\"b950012d685ecf3e7f7ccf416581645cd8a0e61070e08d7c11fc1448d9212435\",\"sequence\":4,\"subject\":{\"shipment_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0\",\"sscc\":\"089300010000000018\",\"status\":\"RECALLED\"}}",
+      "event_hash": "67859fb957efe4ab75b4c5efdf301af7d3844a60efe2108184898d420d09e510"
+    }
+  ]
+}

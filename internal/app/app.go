@@ -1,6 +1,6 @@
 // Package app assembles the telemetry service's background components (ADR-0012): the ingest component, which
-// forwards device readings from MQTT to Kafka, and the processor component, which stores readings. COMPONENTS
-// selects the ones an instance runs; the serve command starts them next to the API.
+// forwards device readings from MQTT to Kafka, and the processor component, which stores readings and keeps the
+// shipment projection. COMPONENTS selects the ones an instance runs; the serve command starts them next to the API.
 package app
 
 import (
@@ -19,6 +19,7 @@ import (
 	"github.com/veritrace-platform/telemetry-stream-service/internal/ingest"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/admin"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/processor"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/projection"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/reading"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/stream"
 )
@@ -30,7 +31,7 @@ type Component string
 const (
 	// Ingest forwards device readings from MQTT to iot.telemetry.raw.
 	Ingest Component = "ingest"
-	// Processor stores readings from iot.telemetry.raw.
+	// Processor stores readings from iot.telemetry.raw and projects shipment.events.
 	Processor Component = "processor"
 )
 
@@ -133,12 +134,22 @@ func NewWorkers(cfg Config, deps Dependencies) (*Workers, error) {
 			w.Close()
 			return nil, err
 		}
-		w.runs = append(w.runs, func(ctx context.Context) error {
-			readings.Run(ctx)
-			return nil
-		})
-		// The consumer leaves its group before the producer that writes its dead letters closes.
-		w.closes = append([]func(){readings.Close}, w.closes...)
+		projector := projection.NewProjector(deps.Pool, logger)
+		shipments, err := stream.NewConsumer(cfg.KafkaBrokers, projection.Group, []string{projection.Topic},
+			projector.Handle, logger)
+		if err != nil {
+			readings.Close()
+			w.Close()
+			return nil, err
+		}
+		for _, c := range []*stream.Consumer{readings, shipments} {
+			w.runs = append(w.runs, func(ctx context.Context) error {
+				c.Run(ctx)
+				return nil
+			})
+		}
+		// Consumers leave their groups before the producer that writes their dead letters closes.
+		w.closes = append([]func(){readings.Close, shipments.Close}, w.closes...)
 	}
 	return w, nil
 }

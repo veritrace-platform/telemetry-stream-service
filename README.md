@@ -68,6 +68,7 @@ and `COMPONENTS` selects the ones an instance runs. The API runs in every instan
 | --- | --- | --- | --- |
 | `ingest` | MQTT `$share/telemetry-ingest/veritrace/v1/devices/+/telemetry` | `iot.telemetry.raw` | Validates device readings and forwards the accepted ones. A message is acknowledged to the broker after Kafka acknowledges its reading. |
 | `processor` | `iot.telemetry.raw` (group `telemetry-stream-service.processor`) | `iot.telemetry.dlq` | Stores readings in the `sensor_readings` hypertable; duplicates are stored once. Records it cannot store go to the dead-letter topic. |
+| `processor` | `shipment.events` (group `telemetry-stream-service.projection`) | — | Keeps `shipment_projection`: status, temperature bounds, participant tenants, and assigned driver of each shipment. |
 
 Consumers commit offsets only after a batch is stored, so a restart may process a batch again, which is
 harmless. `/readyz` reports PostgreSQL, Kafka, and, with `ingest`, the MQTT subscription.
@@ -79,10 +80,11 @@ cmd/telemetry-stream-service/   entry point
 internal/app/                   configuration and wiring of the components
 internal/httpapi/               REST router and /api/v1 route registration
 internal/stream/                Kafka producer and consumer groups; kafkatest: broker for tests
-internal/<domain>/              reading, ingest, processor, ...
+internal/<domain>/              reading, ingest, processor, projection, ...; SQL in <domain>/queries
 internal/platform/              config, logging, trace context, HTTP plumbing, admin, database, migrations
 migrations/                     goose SQL migrations (embedded)
 api/openapi.yaml                REST contract
+sqlc.yaml                       query code generation
 ```
 
 ## Development
@@ -90,6 +92,7 @@ api/openapi.yaml                REST contract
 ```bash
 make test               # unit tests
 make test-integration   # unit + integration tests (Docker: TimescaleDB, Kafka, Mosquitto)
+make generate           # regenerate query code after editing SQL (sqlc, in Docker)
 make lint               # golangci-lint
 make openapi-lint       # validate api/openapi.yaml
 make help               # all targets
