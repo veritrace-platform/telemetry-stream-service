@@ -137,3 +137,24 @@ func TestMetricsRecordsRequests(t *testing.T) {
 		t.Errorf("series count = %d, want 1", n)
 	}
 }
+
+func TestProblemExtensionMembers(t *testing.T) {
+	p := httpx.NewProblem(http.StatusUnprocessableEntity, "OUT_OF_AREA", "position outside the area")
+	p.Extensions = map[string]any{"distance_meters": 412.5, "allowed_meters": 212}
+	rec := httptest.NewRecorder()
+	httpx.WriteProblem(rec, httptest.NewRequest(http.MethodPost, "/api/v1/things", nil), p)
+
+	var got map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got["code"] != "OUT_OF_AREA" || got["instance"] != "/api/v1/things" || got["distance_meters"] != 412.5 ||
+		got["allowed_meters"] != 212.0 || len(got) != 8 {
+		t.Errorf("problem = %v, want the standard members and both extensions", got)
+	}
+
+	b, err := json.Marshal(httpx.NewProblem(http.StatusNotFound, httpx.CodeNotFound, "missing"))
+	if err != nil || string(b) != `{"type":"about:blank","title":"Not Found","status":404,"code":"NOT_FOUND","detail":"missing"}` {
+		t.Errorf("without extensions: %s, %v", b, err)
+	}
+}

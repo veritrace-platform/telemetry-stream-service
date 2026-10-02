@@ -48,6 +48,25 @@ type Problem struct {
 	Instance string       `json:"instance,omitempty"`
 	TraceID  string       `json:"trace_id,omitempty"`
 	Errors   []FieldError `json:"errors,omitempty"`
+	// Extensions are the extension members that the problem's code defines (RFC 9457 §3.2), such as how far a
+	// position lies outside a geo-fence. They are written next to the members above and must not reuse
+	// their names.
+	Extensions map[string]any `json:"-"`
+}
+
+// MarshalJSON writes the extension members at the top level of the problem document.
+func (p Problem) MarshalJSON() ([]byte, error) {
+	type members Problem // the same fields without this method
+	doc, err := json.Marshal(members(p))
+	if err != nil || len(p.Extensions) == 0 {
+		return doc, err
+	}
+	extensions, err := json.Marshal(p.Extensions)
+	if err != nil {
+		return nil, err
+	}
+	// Both are JSON objects; join them into one.
+	return append(append(doc[:len(doc)-1], ','), extensions[1:]...), nil
 }
 
 // FieldError describes one invalid request field.
