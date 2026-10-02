@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: VeriTrace Telemetry API
-  version: 0.1.0
+  version: 0.2.0
   summary: Cold-chain readings, incidents, and the real-time notification WebSocket.
   description: |
     Conventions, error codes, and the endpoint inventory are defined in
@@ -16,8 +16,177 @@ servers:
     description: Local gateway
 security:
   - bearerAuth: []
-tags: []
-paths: {}
+tags:
+  - name: Telemetry
+    description: |
+      Readings and cold-chain incidents of the shipments that the caller's tenant takes part in. Drivers see only the
+      shipments assigned to them (`docs/domain/access-control.md`). A shipment the caller may not see answers 404.
+paths:
+  /api/v1/telemetry/shipments/{sscc}/readings:
+    parameters:
+      - $ref: "#/components/parameters/SSCC"
+    get:
+      operationId: getReadings
+      tags: [Telemetry]
+      summary: Read a shipment's readings
+      description: |
+        Readings recorded in `[from, to)`, oldest first. `raw` returns every stored reading of every device; `1m` and
+        `15m` return the average, minimum, and maximum temperature per bucket, and `15m` reads the continuous
+        aggregate. The window defaults to the last hour (`raw`), day (`1m`), or week (`15m`) before `to`, which
+        defaults to now, and may be at most 6 hours (`raw`), 7 days (`1m`), or 90 days (`15m`).
+
+        A malformed SSCC answers `422 INVALID_GS1_IDENTIFIER`; a shipment the telemetry service does not know, or in
+        which the caller's tenant takes no part, answers 404; a driver who is not assigned to it gets 403.
+      parameters:
+        - name: resolution
+          in: query
+          schema:
+            type: string
+            enum: [raw, 1m, 15m]
+            default: raw
+        - name: from
+          in: query
+          description: Start of the window, inclusive.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: End of the window, exclusive. Defaults to now.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: The readings of the window.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadingSeries"
+              example:
+                sscc: "089300010000000018"
+                resolution: 1m
+                from: "2026-09-01T14:00:00Z"
+                to: "2026-09-01T15:00:00Z"
+                items:
+                  - bucket: "2026-09-01T14:30:00Z"
+                    avg_temperature_celsius: 9.42
+                    min_temperature_celsius: 9.2
+                    max_temperature_celsius: 9.6
+                    reading_count: 12
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/telemetry/shipments/{sscc}/incidents:
+    parameters:
+      - $ref: "#/components/parameters/SSCC"
+    get:
+      operationId: listShipmentIncidents
+      tags: [Telemetry]
+      summary: List a shipment's incidents
+      description: The cold-chain incidents of one shipment, newest first. Errors as for the readings.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of incidents.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/telemetry/incidents:
+    get:
+      operationId: listIncidents
+      tags: [Telemetry]
+      summary: List incidents
+      description: |
+        Newest first: the cold-chain incidents of the shipments that the caller's tenant takes part in. A `DRIVER` sees
+        only the shipments assigned to it. `state=open` keeps the ongoing incidents, `state=resolved` the ended ones.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, resolved]
+      responses:
+        "200":
+          description: A page of incidents.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/telemetry/incidents/summary:
+    get:
+      operationId: getIncidentSummary
+      tags: [Telemetry]
+      summary: Count incidents
+      description: |
+        Of the shipments that the caller sees as in `listIncidents`: the incidents still open, and those confirmed in
+        the last 24 hours.
+      responses:
+        "200":
+          description: The counts.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentSummary"
+              example:
+                open_count: 1
+                last_24h_count: 3
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
     bearerAuth:
@@ -26,6 +195,14 @@ components:
       bearerFormat: JWT
       description: EdDSA-signed access token issued by core-business-service and verified through its JWKS.
   parameters:
+    SSCC:
+      name: sscc
+      in: path
+      required: true
+      description: The shipment's SSCC-18.
+      schema:
+        type: string
+        pattern: "^[0-9]{18}$"
     Limit:
       name: limit
       in: query
@@ -107,6 +284,160 @@ components:
         accuracy_meters:
           type: number
           minimum: 0
+    Reading:
+      type: object
+      required: [recorded_at, device_id, temperature_celsius, humidity_percent, latitude, longitude]
+      properties:
+        recorded_at:
+          type: string
+          format: date-time
+          description: Device time.
+        device_id:
+          type: string
+        temperature_celsius:
+          type: number
+        humidity_percent:
+          type: [number, "null"]
+        latitude:
+          type: number
+        longitude:
+          type: number
+    ReadingBucket:
+      type: object
+      required: [bucket, avg_temperature_celsius, min_temperature_celsius, max_temperature_celsius, reading_count]
+      properties:
+        bucket:
+          type: string
+          format: date-time
+          description: Start of the minute or quarter hour.
+        avg_temperature_celsius:
+          type: number
+          description: Rounded to two decimals.
+        min_temperature_celsius:
+          type: number
+        max_temperature_celsius:
+          type: number
+        reading_count:
+          type: integer
+    ReadingSeries:
+      type: object
+      required: [sscc, resolution, from, to, items]
+      properties:
+        sscc:
+          type: string
+        resolution:
+          type: string
+          enum: [raw, 1m, 15m]
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        items:
+          description: Oldest first. `Reading` items for `raw`, `ReadingBucket` items otherwise.
+          oneOf:
+            - type: array
+              items:
+                $ref: "#/components/schemas/Reading"
+            - type: array
+              items:
+                $ref: "#/components/schemas/ReadingBucket"
+    Incident:
+      type: object
+      description: |
+        A breached episode (`docs/domain/cold-chain-monitoring.md`): confirmed 30 s after the first out-of-bounds
+        reading, and ended by a reading in bounds, by a gap of more than 15 s (at the last reading), or when the
+        shipment stopped being monitored. `incident_hash` covers the confirmation fields (`messaging.md` §5).
+      required:
+        - id
+        - shipment_id
+        - sscc
+        - device_id
+        - started_at
+        - confirmed_at
+        - ended_at
+        - duration_seconds
+        - min_temp_celsius
+        - max_temp_celsius
+        - trigger_temperature_celsius
+        - extreme_temperature_celsius
+        - latitude
+        - longitude
+        - incident_hash
+        - product_name
+        - gtin
+        - lot_number
+      properties:
+        id:
+          type: string
+          format: uuid
+        shipment_id:
+          type: string
+          format: uuid
+        sscc:
+          type: string
+        device_id:
+          type: string
+          description: The device whose reading confirmed the breach.
+        started_at:
+          type: string
+          format: date-time
+        confirmed_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: [string, "null"]
+          format: date-time
+          description: "`null` while the incident is open."
+        duration_seconds:
+          type: [integer, "null"]
+          description: Whole seconds from start to end; `null` while the incident is open.
+        min_temp_celsius:
+          type: number
+          description: The lower bound in force.
+        max_temp_celsius:
+          type: number
+          description: The upper bound in force.
+        trigger_temperature_celsius:
+          type: number
+          description: The temperature of the confirming reading.
+        extreme_temperature_celsius:
+          type: number
+          description: The temperature furthest from the bounds so far.
+        latitude:
+          type: number
+        longitude:
+          type: number
+        incident_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        product_name:
+          type: string
+        gtin:
+          type: string
+        lot_number:
+          type: string
+    IncidentPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Incident"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    IncidentSummary:
+      type: object
+      required: [open_count, last_24h_count]
+      properties:
+        open_count:
+          type: integer
+        last_24h_count:
+          type: integer
+          description: Incidents confirmed in the last 24 hours, open or resolved.
   responses:
     BadRequest:
       description: The request is malformed or fails validation.
@@ -170,6 +501,15 @@ components:
         Retry-After:
           schema:
             type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    ServiceUnavailable:
+      description: Access tokens cannot be verified right now, or the service is shutting down; retry shortly.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
       content:
         application/problem+json:
           schema:

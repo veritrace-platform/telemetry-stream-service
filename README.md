@@ -6,6 +6,7 @@ VeriTrace cold-chain telemetry. The service:
 - persists readings in TimescaleDB;
 - detects temperature breaches and records them as hashed incidents;
 - maintains a shipment projection from `shipment.events`;
+- serves readings and incidents over REST;
 - delivers real-time notifications (breaches, recalls, live readings) over WebSocket.
 
 Platform documentation, including the architecture, domain rules, messaging contracts, and ADRs, lives in
@@ -58,11 +59,12 @@ The binary exposes these subcommands:
 | `MQTT_USERNAME` | `telemetry-ingest` | MQTT user of the ingest component |
 | `MQTT_PASSWORD` | — | MQTT password; required by `ingest` |
 | `MQTT_CLIENT_ID` | `telemetry-ingest-<hostname>` | MQTT session identity; stable across restarts and unique per instance |
+| `JWKS_URL` | — | core's `/.well-known/jwks.json`, whose keys verify access tokens |
 
 ## Components
 
-One binary runs two components ([ADR-0012](https://github.com/veritrace-platform/veritrace/blob/main/docs/adr/0012-cold-chain-detection-engine.md)),
-and `COMPONENTS` selects the ones an instance runs. The API runs in every instance.
+Every instance serves the read API. One binary runs two background components ([ADR-0012](https://github.com/veritrace-platform/veritrace/blob/main/docs/adr/0012-cold-chain-detection-engine.md)),
+and `COMPONENTS` selects the ones an instance runs.
 
 | Component | Consumes | Produces | Work |
 | --- | --- | --- | --- |
@@ -73,7 +75,18 @@ and `COMPONENTS` selects the ones an instance runs. The API runs in every instan
 Consumers commit offsets only after a batch is stored, so a restart may process a batch again, which is
 harmless: incidents and their events derive their IDs from the episode, so a repeated event is recognizable.
 Episodes live in memory and are rebuilt from the database after a restart or a rebalance. `/readyz` reports
-PostgreSQL, Kafka, and, with `ingest`, the MQTT subscription.
+PostgreSQL, Kafka, the token keys, and, with `ingest`, the MQTT subscription.
+
+## API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/telemetry/shipments/{sscc}/readings` | Readings in `[from, to)` at `raw`, `1m`, or `15m` resolution |
+| `GET` | `/api/v1/telemetry/shipments/{sscc}/incidents` | Incidents of one shipment |
+| `GET` | `/api/v1/telemetry/incidents` | Incidents of the caller's shipments (`state=open\|resolved`) |
+| `GET` | `/api/v1/telemetry/incidents/summary` | `{open_count, last_24h_count}` |
+
+Access tokens are core's EdDSA tokens, verified with its JWKS. The contract is `api/openapi.yaml`.
 
 ## Project layout
 
@@ -82,7 +95,8 @@ cmd/telemetry-stream-service/   entry point
 internal/app/                   configuration and wiring of the components
 internal/httpapi/               REST router and /api/v1 route registration
 internal/stream/                Kafka producer and consumer groups; kafkatest: broker for tests
-internal/<domain>/              reading, ingest, processor, detector, incident, projection, ...;
+internal/api/                   read API handlers
+internal/<domain>/              reading, ingest, processor, detector, incident, projection, auth, access, ...;
                                 SQL in <domain>/queries
 internal/platform/              config, logging, trace context, HTTP plumbing, admin, database, migrations
 migrations/                     goose SQL migrations (embedded)

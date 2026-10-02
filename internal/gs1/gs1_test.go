@@ -74,3 +74,20 @@ func TestValidSSCCRejectsOtherKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckSSCCReasons(t *testing.T) {
+	for sscc, want := range map[string]string{
+		"089300010000000018":  "",
+		"08930001000000001":   gs1.ReasonLength,
+		"0893000100000000180": gs1.ReasonLength,
+		"08930001000000001X":  gs1.ReasonNonNumeric,
+		"089300010000000019":  gs1.ReasonCheckDigit,
+	} {
+		if got := gs1.CheckSSCC(sscc); got != want {
+			t.Errorf("CheckSSCC(%s) = %q, want %q", sscc, got, want)
+		}
+	}
+	if gs1.Message(gs1.ReasonCheckDigit) == gs1.Message(gs1.ReasonLength) {
+		t.Error("Message() does not tell reasons apart")
+	}
+}

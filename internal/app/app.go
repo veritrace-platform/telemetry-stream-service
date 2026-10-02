@@ -1,7 +1,6 @@
-// Package app assembles the telemetry service's background components (ADR-0012): the ingest component, which
-// forwards device readings from MQTT to Kafka, and the processor component, which stores readings, detects
-// breaches, and keeps the shipment projection. COMPONENTS selects the ones an instance runs; the serve command
-// starts them next to the API.
+// Package app assembles the telemetry service. Every instance serves the read API. Its background components (ADR-0012) are the ingest component, which forwards device readings from MQTT to Kafka,
+// and the processor component, which stores readings, detects breaches, and keeps the shipment projection;
+// COMPONENTS selects the ones an instance runs. The serve command starts them next to the API.
 package app
 
 import (
@@ -9,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"slices"
 	"sync"
 	"time"
@@ -18,7 +19,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/veritrace-platform/telemetry-stream-service/internal/api"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/auth"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/detector"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/httpapi"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/ingest"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/admin"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/processor"
@@ -46,6 +50,8 @@ type Config struct {
 	KafkaBrokers []string `env:"KAFKA_BROKERS" envSeparator:","`
 	// MQTT is read when the ingest component runs.
 	MQTT ingest.Config
+	// JWKSURL is the address of core's public keys, which verify access tokens (ADR-0007).
+	JWKSURL string `env:"JWKS_URL"`
 }
 
 // LoadConfig reads the telemetry settings from the environment.
@@ -76,6 +82,10 @@ func (c Config) Validate() error {
 	if len(c.KafkaBrokers) == 0 {
 		errs = append(errs, errors.New("KAFKA_BROKERS is required"))
 	}
+	if u, err := url.Parse(c.JWKSURL); c.JWKSURL == "" || err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
+		u.Host == "" {
+		errs = append(errs, errors.New("JWKS_URL must be the URL of core's /.well-known/jwks.json"))
+	}
 	if c.Runs(Ingest) {
 		if err := c.MQTT.Validate(); err != nil {
 			errs = append(errs, err)
@@ -92,6 +102,34 @@ type Dependencies struct {
 	Pool *pgxpool.Pool
 	// Now reads the clock; tests inject a fixed one.
 	Now func() time.Time
+}
+
+// API is what an instance serves: the read API.
+type API struct {
+	Handler http.Handler
+	// Checks are the readiness checks of the API's dependencies.
+	Checks map[string]admin.Check
+}
+
+// jwksTimeout bounds requests to core's key set.
+const jwksTimeout = 5 * time.Second
+
+// NewAPI returns the API of an instance.
+func NewAPI(cfg Config, deps Dependencies) (*API, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	now := deps.Now
+	if now == nil {
+		now = time.Now
+	}
+	keys := auth.NewJWKS(cfg.JWKSURL, &http.Client{Timeout: jwksTimeout}, deps.Logger, now)
+	verifier := auth.NewVerifier(keys, now)
+	reads := api.NewHandler(deps.Pool, verifier.Middleware, deps.Logger, now)
+	return &API{
+		Handler: httpapi.NewRouter(deps.Logger, deps.Registerer, httpapi.Mounts{API: []httpapi.Routes{reads.Routes}}),
+		Checks:  map[string]admin.Check{"jwks": keys.Ready},
+	}, nil
 }
 
 // Workers are the components that an instance runs.

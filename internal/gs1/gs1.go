@@ -17,15 +17,44 @@ func CheckDigit(payload string) int {
 	return (10 - sum%10) % 10
 }
 
-// ValidSSCC reports whether sscc has 18 digits and a correct check digit.
-func ValidSSCC(sscc string) bool {
+// Reasons why a key is invalid, in the order they are checked. They are the field error codes of
+// INVALID_GS1_IDENTIFIER problems (rest-api.md §1.1).
+const (
+	ReasonLength     = "LENGTH"
+	ReasonNonNumeric = "NON_NUMERIC"
+	ReasonCheckDigit = "CHECK_DIGIT"
+)
+
+// CheckSSCC returns why sscc is not a valid SSCC-18, or "" if it is one.
+func CheckSSCC(sscc string) string {
 	if len(sscc) != ssccLength {
-		return false
+		return ReasonLength
 	}
 	for i := range len(sscc) {
 		if sscc[i] < '0' || sscc[i] > '9' {
-			return false
+			return ReasonNonNumeric
 		}
 	}
-	return CheckDigit(sscc[:ssccLength-1]) == int(sscc[ssccLength-1]-'0')
+	if CheckDigit(sscc[:ssccLength-1]) != int(sscc[ssccLength-1]-'0') {
+		return ReasonCheckDigit
+	}
+	return ""
+}
+
+// ValidSSCC reports whether sscc has 18 digits and a correct check digit.
+func ValidSSCC(sscc string) bool {
+	return CheckSSCC(sscc) == ""
+}
+
+// Message describes a reason for an API client.
+func Message(reason string) string {
+	switch reason {
+	case ReasonLength:
+		return "must be 18 digits"
+	case ReasonNonNumeric:
+		return "must contain only digits"
+	case ReasonCheckDigit:
+		return "has an invalid check digit"
+	}
+	return "is invalid"
 }
