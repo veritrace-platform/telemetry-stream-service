@@ -106,11 +106,15 @@ func fromRow(row queries.TelemetryShipmentProjection) Shipment {
 	}
 }
 
-// LookUp returns the projections of the SSCCs that the projection knows, by SSCC.
-func LookUp(ctx context.Context, db queries.DBTX, ssccs []string) (map[string]Shipment, error) {
-	rows, err := queries.New(db).GetShipments(ctx, ssccs)
+// LockForDetection returns the projections of the SSCCs that the projection knows, by SSCC, and keeps their
+// status from changing until the transaction of db ends. The detector evaluates readings in that transaction, so a
+// shipment that stops being monitored waits for the incidents the transaction records, and the projector then
+// resolves them (Projector.Handle); without the lock, an incident confirmed at that moment could stay open
+// forever. A deadlock with a projector batch is possible and broken by PostgreSQL; the failed batch is retried.
+func LockForDetection(ctx context.Context, db queries.DBTX, ssccs []string) (map[string]Shipment, error) {
+	rows, err := queries.New(db).LockShipments(ctx, ssccs)
 	if err != nil {
-		return nil, fmt.Errorf("look up shipments: %w", err)
+		return nil, fmt.Errorf("lock shipments: %w", err)
 	}
 	shipments := make(map[string]Shipment, len(rows))
 	for _, row := range rows {

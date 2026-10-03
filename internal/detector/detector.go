@@ -111,7 +111,8 @@ func (d *Detector) evaluate(ctx context.Context, inputs []Input) error {
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	shipments, err := projection.LookUp(ctx, tx, ssccs)
+	// The projections stay as read until the incidents of the batch are recorded (projection.LockForDetection).
+	shipments, err := projection.LockForDetection(ctx, tx, ssccs)
 	if err != nil {
 		return err
 	}

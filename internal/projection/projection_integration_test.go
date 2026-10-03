@@ -249,6 +249,79 @@ func TestProjector(t *testing.T) {
 		}
 	})
 
+	t.Run("a status change waits for the incidents that a detection records", func(t *testing.T) {
+		const sscc = "089300010000000094"
+		id := uuid.New()
+		handle(t, rekey(events[0], id, sscc), rekey(events[1], id, sscc), rekey(events[2], id, sscc))
+		start := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
+		var readings []reading.Reading
+		for s := 0; s <= 40; s += 5 {
+			readings = append(readings, reading.Reading{
+				DeviceID: "REEFER-0001", SSCC: sscc, RecordedAt: start.Add(time.Duration(s) * time.Second),
+				ReceivedAt: start.Add(time.Duration(s) * time.Second), TemperatureCelsius: 9, Latitude: 10.8, Longitude: 106.7,
+			})
+		}
+		if _, err := reading.NewStore(db.App).Insert(t.Context(), readings); err != nil {
+			t.Fatal(err)
+		}
+		before := len(producer.records)
+
+		// A detection reads the shipment in its transaction, as Detector.Evaluate does, and confirms a breach.
+		tx, err := db.App.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		shipments, err := projection.LockForDetection(t.Context(), tx, []string{sscc, "089300010000000100"})
+		if err != nil || len(shipments) != 1 || shipments[sscc].Status != projection.StatusInTransit {
+			t.Fatalf("LockForDetection() = %+v, %v", shipments, err)
+		}
+
+		// Meanwhile the shipment is delivered: the projector waits for the detection.
+		delivered := rekey(events[2], id, sscc)
+		delivered["event_type"], delivered["sequence"] = "shipment.delivery_confirmed", 4
+		delivered["occurred_at"] = start.Add(45 * time.Second).Format("2006-01-02T15:04:05.000000Z")
+		delivered["subject"].(map[string]any)["status"] = projection.StatusDelivered
+		rec := record(t, delivered)
+		done := make(chan error, 1)
+		go func() { done <- projector.Handle(context.Background(), []*kgo.Record{rec}) }()
+		select {
+		case err := <-done:
+			t.Fatalf("the delivery was applied while a detection held the shipment (error %v)", err)
+		case <-time.After(300 * time.Millisecond):
+		}
+
+		open := incident.Incident{
+			ID: incident.NewID(sscc, start), ShipmentID: id, SSCC: sscc, DeviceID: "REEFER-0001", StartedAt: start,
+			ConfirmedAt: start.Add(30 * time.Second), MinTempCelsius: 2, MaxTempCelsius: 6, TriggerTemperatureCelsius: 9,
+			ExtremeTemperatureCelsius: 9, Latitude: 10.8, Longitude: 106.7,
+		}
+		open.IncidentHash, _ = open.Confirmation().Hash()
+		if _, err := incident.NewStore(tx).Insert(t.Context(), open); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+
+		// Once the detection commits, the delivery is applied and resolves the breach it recorded.
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Handle() error = %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the delivery was not applied after the detection committed")
+		}
+		closed, _, err := incident.NewStore(db.Owner).Latest(t.Context(), sscc)
+		if err != nil || closed.EndedAt == nil || !closed.EndedAt.Equal(start.Add(40*time.Second)) {
+			t.Errorf("incident = %+v, %v; want it resolved at the last reading before delivery", closed, err)
+		}
+		if len(producer.records) != before+1 {
+			t.Errorf("events = %d, want the resolution after %d", len(producer.records), before)
+		}
+	})
+
 	t.Run("an event without occurred_at is skipped", func(t *testing.T) {
 		const sscc = "089300010000000087"
 		created := rekey(events[0], uuid.New(), sscc)
