@@ -28,8 +28,8 @@ make migrate-up     # create or upgrade the schema (owner role)
 make run            # API and WebSocket on :8090, admin on :8091, plus the ingest and processor components
 ```
 
-`make run` needs Kafka and Mosquitto from the local environment. The IoT fleet simulator in
-`platform-infrastructure` publishes readings to try it with.
+`make run` needs Kafka and Mosquitto from the local environment, and core-business-service, whose keys verify
+access tokens. The IoT fleet simulator in `platform-infrastructure` publishes readings to try it with.
 
 ## Commands
 
@@ -116,6 +116,7 @@ make test-integration   # unit + integration tests (Docker: TimescaleDB, Kafka, 
 make generate           # regenerate query code after editing SQL (sqlc, in Docker)
 make lint               # golangci-lint
 make openapi-lint       # validate api/openapi.yaml
+make check              # what CI checks: lint, generated code, OpenAPI, all tests
 make help               # all targets
 ```
 

@@ -38,8 +38,10 @@ const (
 	MaxSubscriptions = 20
 	pingInterval     = 30 * time.Second
 	pongTimeout      = 10 * time.Second
-	// maxClientMessage bounds a client message; subscriptions are a few dozen bytes.
+	// maxClientMessage bounds a client message; subscriptions are a few dozen bytes. A longer message closes the
+	// connection with 4400, and one longer than maxFrame with 1009, which the WebSocket library sends.
 	maxClientMessage = 4096
+	maxFrame         = 64 << 10
 	// sendBuffer is how many messages a connection may fall behind before it is closed.
 	sendBuffer   = 256
 	writeTimeout = 10 * time.Second
@@ -152,7 +154,7 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	// The request context must not be used once the connection is hijacked.
 	ctx := context.WithoutCancel(r.Context())
-	conn.SetReadLimit(64 << 10)
+	conn.SetReadLimit(maxFrame)
 
 	principal, err := h.verifier.Verify(ctx, token)
 	switch {

@@ -26,6 +26,7 @@ func newRouter(t *testing.T, logs *bytes.Buffer, registry *prometheus.Registry) 
 	r.NotFound(httpx.NotFound)
 	r.MethodNotAllowed(httpx.MethodNotAllowed)
 	r.Get("/items/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	r.Patch("/items/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	r.Get("/panic", func(http.ResponseWriter, *http.Request) { panic("boom") })
 	return r
 }
@@ -73,6 +74,28 @@ func TestMethodNotAllowedReturnsProblem(t *testing.T) {
 	}
 	if p := decodeProblem(t, rec); p.Code != httpx.CodeMethodNotAllowed {
 		t.Errorf("code = %q, want %q", p.Code, httpx.CodeMethodNotAllowed)
+	}
+	if allow := rec.Header().Get("Allow"); allow != "GET, PATCH" {
+		t.Errorf("Allow = %q, want the methods of the route", allow)
+	}
+}
+
+func TestSecureHeaders(t *testing.T) {
+	handler := httpx.SecureHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/keys" {
+			w.Header().Set("Cache-Control", "public, max-age=300")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for path, cacheControl := range map[string]string{"/items": "no-store", "/keys": "public, max-age=300"} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := rec.Header().Get("Cache-Control"); got != cacheControl {
+			t.Errorf("%s: Cache-Control = %q, want %q", path, got, cacheControl)
+		}
+		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("%s: X-Content-Type-Options = %q, want nosniff", path, got)
+		}
 	}
 }
 

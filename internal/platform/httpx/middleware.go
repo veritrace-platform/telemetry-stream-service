@@ -32,6 +32,17 @@ func Trace(next http.Handler) http.Handler {
 	})
 }
 
+// SecureHeaders sets the headers that every API response carries (OWASP REST Security Cheat Sheet): browsers do
+// not sniff content types, and responses are not stored by caches, which keeps tenant data out of shared ones. A
+// handler whose response may be cached sets its own Cache-Control.
+func SecureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Recover converts panics into 500 responses and logs them with a stack trace.
 func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

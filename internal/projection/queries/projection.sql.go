@@ -130,15 +130,32 @@ func (q *Queries) GetShipment(ctx context.Context, sscc string) (TelemetryShipme
 	return i, err
 }
 
-const getShipments = `-- name: GetShipments :many
+const lastEventSequence = `-- name: LastEventSequence :one
+SELECT last_event_sequence
+FROM telemetry.shipment_projection
+WHERE sscc = $1
+`
+
+func (q *Queries) LastEventSequence(ctx context.Context, sscc string) (int32, error) {
+	row := q.db.QueryRow(ctx, lastEventSequence, sscc)
+	var last_event_sequence int32
+	err := row.Scan(&last_event_sequence)
+	return last_event_sequence, err
+}
+
+const lockShipments = `-- name: LockShipments :many
 SELECT sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driver_id, status, gtin, product_name,
        lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence, updated_at
 FROM telemetry.shipment_projection
 WHERE sscc = ANY (CAST($1::text[] AS bpchar[]))
+ORDER BY sscc
+FOR SHARE
 `
 
-func (q *Queries) GetShipments(ctx context.Context, ssccs []string) ([]TelemetryShipmentProjection, error) {
-	rows, err := q.db.Query(ctx, getShipments, ssccs)
+// Reads the projections of a detector batch and keeps their status from changing until the transaction ends.
+// The rows are locked in SSCC order.
+func (q *Queries) LockShipments(ctx context.Context, ssccs []string) ([]TelemetryShipmentProjection, error) {
+	rows, err := q.db.Query(ctx, lockShipments, ssccs)
 	if err != nil {
 		return nil, err
 	}
@@ -169,17 +186,4 @@ func (q *Queries) GetShipments(ctx context.Context, ssccs []string) ([]Telemetry
 		return nil, err
 	}
 	return items, nil
-}
-
-const lastEventSequence = `-- name: LastEventSequence :one
-SELECT last_event_sequence
-FROM telemetry.shipment_projection
-WHERE sscc = $1
-`
-
-func (q *Queries) LastEventSequence(ctx context.Context, sscc string) (int32, error) {
-	row := q.db.QueryRow(ctx, lastEventSequence, sscc)
-	var last_event_sequence int32
-	err := row.Scan(&last_event_sequence)
-	return last_event_sequence, err
 }

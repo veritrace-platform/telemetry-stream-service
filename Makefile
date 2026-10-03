@@ -74,6 +74,9 @@ generate-check: ## Fail when the generated query code is out of date
 openapi-lint: ## Validate the OpenAPI document
 	npx --yes @redocly/cli@$(REDOCLY_CLI_VERSION) lint api/openapi.yaml
 
+.PHONY: check
+check: lint generate-check openapi-lint test-integration ## Run the checks of CI: lint, generated code, OpenAPI, all tests
+
 .PHONY: docker-build
 docker-build: ## Build the container image
 	docker build --build-arg VERSION=$(VERSION) -t veritrace/$(BINARY):$(VERSION) .

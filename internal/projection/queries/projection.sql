@@ -38,8 +38,12 @@ SELECT sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driv
 FROM telemetry.shipment_projection
 WHERE sscc = @sscc;
 
--- name: GetShipments :many
+-- name: LockShipments :many
+-- Reads the projections of a detector batch and keeps their status from changing until the transaction ends.
+-- The rows are locked in SSCC order.
 SELECT sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driver_id, status, gtin, product_name,
        lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence, updated_at
 FROM telemetry.shipment_projection
-WHERE sscc = ANY (CAST(sqlc.arg(ssccs)::text[] AS bpchar[]));
+WHERE sscc = ANY (CAST(sqlc.arg(ssccs)::text[] AS bpchar[]))
+ORDER BY sscc
+FOR SHARE;

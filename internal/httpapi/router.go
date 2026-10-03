@@ -30,6 +30,7 @@ func NewRouter(logger *slog.Logger, registerer prometheus.Registerer, mounts Mou
 	r := chi.NewRouter()
 	r.Use(
 		httpx.Trace,
+		httpx.SecureHeaders,
 		httpx.AccessLog(logger),
 		httpx.Metrics(registerer, "telemetry"),
 		httpx.Recover(logger),

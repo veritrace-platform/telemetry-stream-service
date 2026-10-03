@@ -147,11 +147,6 @@ func (c *Consumer) process(ctx context.Context, records []*kgo.Record) bool {
 	}
 }
 
-// Ping reports whether a broker is reachable.
-func (c *Consumer) Ping(ctx context.Context) error {
-	return c.client.Ping(ctx)
-}
-
 // Close leaves the group and closes the connections to the brokers.
 func (c *Consumer) Close() {
 	c.client.Close()
