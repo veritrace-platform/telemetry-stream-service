@@ -30,6 +30,10 @@ func TestMiddlewareAppliesWithoutRoutes(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&p); err != nil {
 			t.Fatalf("%s: decode problem: %v", path, err)
 		}
+		if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: Cache-Control = %q, X-Content-Type-Options = %q", path, rec.Header().Get("Cache-Control"),
+				rec.Header().Get("X-Content-Type-Options"))
+		}
 		if p.TraceID == "" || p.TraceID != rec.Header().Get(httpx.TraceHeader) {
 			t.Errorf("%s: trace_id = %q, X-Trace-Id = %q; want equal and non-empty", path, p.TraceID, rec.Header().Get(httpx.TraceHeader))
 		}
@@ -65,6 +69,10 @@ func TestMountedRoutesAreServedUnderTheirPrefix(t *testing.T) {
 		router.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
 		if rec.Code != tt.want {
 			t.Errorf("%s %s: status = %d, want %d", tt.method, tt.path, rec.Code, tt.want)
+		}
+		// Routes in mounted trees name their methods in the Allow header of a 405 too.
+		if tt.want == http.StatusMethodNotAllowed && rec.Header().Get("Allow") != http.MethodGet {
+			t.Errorf("%s %s: Allow = %q, want GET", tt.method, tt.path, rec.Header().Get("Allow"))
 		}
 	}
 }

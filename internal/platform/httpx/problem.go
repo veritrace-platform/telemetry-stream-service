@@ -4,6 +4,9 @@ package httpx
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/tracecontext"
 )
@@ -114,7 +117,31 @@ func NotFound(w http.ResponseWriter, r *http.Request) {
 	WriteProblem(w, r, NewProblem(http.StatusNotFound, CodeNotFound, "resource not found"))
 }
 
-// MethodNotAllowed responds with 405 METHOD_NOT_ALLOWED for known routes with an unsupported method.
+// MethodNotAllowed responds with 405 METHOD_NOT_ALLOWED for known routes with an unsupported method. The Allow
+// header lists the methods the route supports, as RFC 9110 requires.
 func MethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	if allowed := allowedMethods(r); len(allowed) > 0 {
+		w.Header().Set("Allow", strings.Join(allowed, ", "))
+	}
 	WriteProblem(w, r, NewProblem(http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed"))
+}
+
+// routableMethods are the methods that handlers register.
+var routableMethods = []string{
+	http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete,
+}
+
+// allowedMethods returns the methods for which the router that handles r has a route at r's path.
+func allowedMethods(r *http.Request) []string {
+	rctx := chi.RouteContext(r.Context())
+	if rctx == nil || rctx.Routes == nil {
+		return nil
+	}
+	var allowed []string
+	for _, method := range routableMethods {
+		if rctx.Routes.Match(chi.NewRouteContext(), method, r.URL.Path) {
+			allowed = append(allowed, method)
+		}
+	}
+	return allowed
 }
