@@ -132,7 +132,8 @@ func (v *Verifier) Verify(ctx context.Context, token string) (Principal, error) 
 const (
 	// refreshAfter is how long a key set is used before it is fetched again.
 	refreshAfter = 10 * time.Minute
-	// refetchAfter limits how often an unknown key ID causes a fetch, for example right after a key rotation.
+	// refetchAfter limits how often keys are fetched while some are loaded: for an unknown key ID, for example
+	// right after a key rotation, or after a refresh that failed.
 	refetchAfter = 30 * time.Second
 	// retryAfter limits how often a key set that could not be loaded at all is fetched again.
 	retryAfter = 2 * time.Second
@@ -160,25 +161,23 @@ func NewJWKS(url string, client *http.Client, logger *slog.Logger, now func() ti
 	return &JWKS{url: url, client: client, logger: logger, now: now}
 }
 
-// Key returns the Ed25519 public key with the ID kid.
+// Key returns the Ed25519 public key with the ID kid. The key set is fetched on first use, again once it is 10
+// minutes old, and again for a key ID it lacks, so that a rotated key is found. A fetch that fails keeps the keys
+// loaded before, and the next attempt waits 2 s while no key is loaded and 30 s otherwise, so that an unreachable
+// core does not slow down every request.
 func (j *JWKS) Key(ctx context.Context, kid string) (ed25519.PublicKey, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	now := j.now()
-	_, known := j.keys[kid]
+	key, known := j.keys[kid]
+	if !known || now.Sub(j.loadedAt) >= refreshAfter {
+		j.refreshIfDue(ctx, now)
+		key, known = j.keys[kid]
+	}
 	switch {
 	case j.keys == nil:
-		if now.Sub(j.attemptAt) >= retryAfter {
-			j.refresh(ctx, now)
-		}
-	case !known && now.Sub(j.attemptAt) >= refetchAfter, now.Sub(j.loadedAt) >= refreshAfter:
-		j.refresh(ctx, now)
-	}
-	if j.keys == nil {
 		return nil, ErrKeysUnavailable
-	}
-	key, known := j.keys[kid]
-	if !known {
+	case !known:
 		return nil, fmt.Errorf("unknown key %q", kid)
 	}
 	return key, nil
@@ -189,7 +188,7 @@ func (j *JWKS) Ready(ctx context.Context) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.keys == nil {
-		j.refresh(ctx, j.now())
+		j.refreshIfDue(ctx, j.now())
 	}
 	if j.keys == nil {
 		return ErrKeysUnavailable
@@ -197,8 +196,15 @@ func (j *JWKS) Ready(ctx context.Context) error {
 	return nil
 }
 
-// refresh fetches the key set; on failure it keeps the keys it has.
-func (j *JWKS) refresh(ctx context.Context, now time.Time) {
+// refreshIfDue fetches the key set unless the last attempt is too recent. On failure it keeps the keys it has.
+func (j *JWKS) refreshIfDue(ctx context.Context, now time.Time) {
+	wait := refetchAfter
+	if j.keys == nil {
+		wait = retryAfter
+	}
+	if !j.attemptAt.IsZero() && now.Sub(j.attemptAt) < wait {
+		return
+	}
 	j.attemptAt = now
 	keys, err := j.fetch(ctx)
 	if err != nil {

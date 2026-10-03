@@ -128,7 +128,12 @@ func TestJWKSUnavailable(t *testing.T) {
 		t.Errorf("Ready() error = %v", err)
 	}
 
+	// Without keys, the next attempt waits 2 s.
 	iss.Unavailable.Store(false)
+	if err := keys.Ready(t.Context()); !errors.Is(err, auth.ErrKeysUnavailable) {
+		t.Errorf("Ready() right after a failed attempt error = %v, want ErrKeysUnavailable", err)
+	}
+	c.t = c.t.Add(2 * time.Second)
 	if err := keys.Ready(t.Context()); err != nil {
 		t.Fatalf("Ready() error = %v", err)
 	}
@@ -137,6 +142,44 @@ func TestJWKSUnavailable(t *testing.T) {
 	c.t = c.t.Add(time.Hour)
 	if _, err := v.Verify(t.Context(), token); err != nil {
 		t.Errorf("Verify() with cached keys error = %v", err)
+	}
+}
+
+func TestJWKSDoesNotFetchOnEveryCallWhileCoreIsDown(t *testing.T) {
+	iss := authtest.NewIssuer(t)
+	c := &clock{t: time.Now()}
+	v, _ := newVerifier(iss.URL, c)
+	token := iss.Token(t, authtest.Principal(auth.RoleWarehouseManager))
+	if _, err := v.Verify(t.Context(), token); err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+
+	// The keys are due for a refresh, and core does not answer: the cached keys keep working, and only the first
+	// call tries to fetch.
+	iss.Unavailable.Store(true)
+	c.t = c.t.Add(11 * time.Minute)
+	for range 5 {
+		if _, err := v.Verify(t.Context(), token); err != nil {
+			t.Fatalf("Verify() with a cached key while core is down error = %v", err)
+		}
+	}
+	if n := iss.Fetches.Load(); n != 2 {
+		t.Errorf("fetches = %d, want 2: the first load and one failed refresh", n)
+	}
+
+	// The next attempt comes 30 s later, and succeeds once core is back.
+	iss.Unavailable.Store(false)
+	c.t = c.t.Add(29 * time.Second)
+	if _, err := v.Verify(t.Context(), token); err != nil || iss.Fetches.Load() != 2 {
+		t.Errorf("Verify() 29 s after the failed refresh = %v, fetches %d; want no new fetch", err, iss.Fetches.Load())
+	}
+	c.t = c.t.Add(time.Second)
+	if _, err := v.Verify(t.Context(), token); err != nil || iss.Fetches.Load() != 3 {
+		t.Errorf("Verify() 30 s after the failed refresh = %v, fetches %d; want a new fetch", err, iss.Fetches.Load())
+	}
+	c.t = c.t.Add(5 * time.Minute)
+	if _, err := v.Verify(t.Context(), token); err != nil || iss.Fetches.Load() != 3 {
+		t.Errorf("Verify() with fresh keys = %v, fetches %d; want no new fetch", err, iss.Fetches.Load())
 	}
 }
 

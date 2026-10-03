@@ -23,7 +23,7 @@ import (
 type Issuer struct {
 	// URL is the JWKS document's address.
 	URL string
-	// Fetches counts the JWKS requests served.
+	// Fetches counts the JWKS requests, answered or not.
 	Fetches atomic.Int32
 	// Unavailable makes the JWKS server answer 503.
 	Unavailable atomic.Bool
@@ -39,11 +39,11 @@ func NewIssuer(t testing.TB) *Issuer {
 	iss := &Issuer{keys: map[string]ed25519.PrivateKey{}}
 	iss.Rotate(t, "test-1")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		iss.Fetches.Add(1)
 		if iss.Unavailable.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		iss.Fetches.Add(1)
 		iss.mu.Lock()
 		defer iss.mu.Unlock()
 		type jwk struct {
