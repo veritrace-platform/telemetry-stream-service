@@ -4,6 +4,9 @@ package httpx
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/tracecontext"
 )
@@ -23,6 +26,18 @@ const (
 	CodeServiceUnavailable   = "SERVICE_UNAVAILABLE"
 )
 
+// Field error codes shared by every endpoint. Domain packages add their own, such as the GS1 codes.
+const (
+	FieldRequired      = "REQUIRED"
+	FieldInvalidFormat = "INVALID_FORMAT"
+	FieldInvalidType   = "INVALID_TYPE"
+	FieldInvalidValue  = "INVALID_VALUE"
+	FieldTooShort      = "TOO_SHORT"
+	FieldTooLong       = "TOO_LONG"
+	FieldOutOfRange    = "OUT_OF_RANGE"
+	FieldUnknown       = "UNKNOWN_FIELD"
+)
+
 // ProblemContentType is the media type of every error response.
 const ProblemContentType = "application/problem+json"
 
@@ -36,6 +51,25 @@ type Problem struct {
 	Instance string       `json:"instance,omitempty"`
 	TraceID  string       `json:"trace_id,omitempty"`
 	Errors   []FieldError `json:"errors,omitempty"`
+	// Extensions are the extension members that the problem's code defines (RFC 9457 §3.2), such as how far a
+	// position lies outside a geo-fence. They are written next to the members above and must not reuse
+	// their names.
+	Extensions map[string]any `json:"-"`
+}
+
+// MarshalJSON writes the extension members at the top level of the problem document.
+func (p Problem) MarshalJSON() ([]byte, error) {
+	type members Problem // the same fields without this method
+	doc, err := json.Marshal(members(p))
+	if err != nil || len(p.Extensions) == 0 {
+		return doc, err
+	}
+	extensions, err := json.Marshal(p.Extensions)
+	if err != nil {
+		return nil, err
+	}
+	// Both are JSON objects; join them into one.
+	return append(append(doc[:len(doc)-1], ','), extensions[1:]...), nil
 }
 
 // FieldError describes one invalid request field.
@@ -54,6 +88,13 @@ func NewProblem(status int, code, detail string) Problem {
 		Code:   code,
 		Detail: detail,
 	}
+}
+
+// ValidationProblem builds the 400 VALIDATION_FAILED problem that lists every invalid field.
+func ValidationProblem(errs []FieldError) Problem {
+	p := NewProblem(http.StatusBadRequest, CodeValidationFailed, "request validation failed")
+	p.Errors = errs
+	return p
 }
 
 // WriteProblem writes p as the response, filling in the request path and trace ID.
@@ -76,7 +117,31 @@ func NotFound(w http.ResponseWriter, r *http.Request) {
 	WriteProblem(w, r, NewProblem(http.StatusNotFound, CodeNotFound, "resource not found"))
 }
 
-// MethodNotAllowed responds with 405 METHOD_NOT_ALLOWED for known routes with an unsupported method.
+// MethodNotAllowed responds with 405 METHOD_NOT_ALLOWED for known routes with an unsupported method. The Allow
+// header lists the methods the route supports, as RFC 9110 requires.
 func MethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	if allowed := allowedMethods(r); len(allowed) > 0 {
+		w.Header().Set("Allow", strings.Join(allowed, ", "))
+	}
 	WriteProblem(w, r, NewProblem(http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed"))
+}
+
+// routableMethods are the methods that handlers register.
+var routableMethods = []string{
+	http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete,
+}
+
+// allowedMethods returns the methods for which the router that handles r has a route at r's path.
+func allowedMethods(r *http.Request) []string {
+	rctx := chi.RouteContext(r.Context())
+	if rctx == nil || rctx.Routes == nil {
+		return nil
+	}
+	var allowed []string
+	for _, method := range routableMethods {
+		if rctx.Routes.Match(chi.NewRouteContext(), method, r.URL.Path) {
+			allowed = append(allowed, method)
+		}
+	}
+	return allowed
 }

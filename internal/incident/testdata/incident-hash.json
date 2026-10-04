@@ -1,0 +1,41 @@
+{
+  "description": "incident_hash of cold-chain incidents (docs/contracts/messaging.md section 5, ADR-0006): the SHA-256, in lowercase hex, of hash_input, the RFC 8785 canonical JSON of the cold_chain.breach_confirmed data without incident_hash. Times are UTC with milliseconds.",
+  "incidents": [
+    {
+      "note": "A breach of chilled goods (2-8 °C), confirmed 30 s after the first excursion reading",
+      "confirmation": {
+        "incident_id": "01990a3c-d2a0-7b3e-9f1a-2c4d6e8f0a1b",
+        "shipment_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0",
+        "sscc": "089300010000000018",
+        "device_id": "REEFER-0001",
+        "started_at": "2026-09-01T14:30:00.000Z",
+        "confirmed_at": "2026-09-01T14:30:30.000Z",
+        "min_temp_celsius": 2,
+        "max_temp_celsius": 8,
+        "temperature_celsius": 9.4,
+        "latitude": 10.8705,
+        "longitude": 106.8035
+      },
+      "hash_input": "{\"confirmed_at\":\"2026-09-01T14:30:30.000Z\",\"device_id\":\"REEFER-0001\",\"incident_id\":\"01990a3c-d2a0-7b3e-9f1a-2c4d6e8f0a1b\",\"latitude\":10.8705,\"longitude\":106.8035,\"max_temp_celsius\":8,\"min_temp_celsius\":2,\"shipment_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0\",\"sscc\":\"089300010000000018\",\"started_at\":\"2026-09-01T14:30:00.000Z\",\"temperature_celsius\":9.4}",
+      "incident_hash": "b1fccea0043c8d19b0247a00e77e9ebbee063c9623512b4b812abbaf5ba5289d"
+    },
+    {
+      "note": "Frozen goods (-25.5 to -18 °C) that warmed up, with fractional bounds, milliseconds, and negative coordinates",
+      "confirmation": {
+        "incident_id": "01990a3d-5f10-7c44-8a2b-3d5e7f9a1b2c",
+        "shipment_id": "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7db0",
+        "sscc": "089345670000000017",
+        "device_id": "SIM-089345670000000017-2",
+        "started_at": "2026-09-01T23:59:45.125Z",
+        "confirmed_at": "2026-09-02T00:00:20.750Z",
+        "min_temp_celsius": -25.5,
+        "max_temp_celsius": -18,
+        "temperature_celsius": -16.25,
+        "latitude": -33.868819,
+        "longitude": -70.512345
+      },
+      "hash_input": "{\"confirmed_at\":\"2026-09-02T00:00:20.750Z\",\"device_id\":\"SIM-089345670000000017-2\",\"incident_id\":\"01990a3d-5f10-7c44-8a2b-3d5e7f9a1b2c\",\"latitude\":-33.868819,\"longitude\":-70.512345,\"max_temp_celsius\":-18,\"min_temp_celsius\":-25.5,\"shipment_id\":\"0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7db0\",\"sscc\":\"089345670000000017\",\"started_at\":\"2026-09-01T23:59:45.125Z\",\"temperature_celsius\":-16.25}",
+      "incident_hash": "72c6c18d1e2749a0bc8a7e152abe1fa29b611d0dd6ce84b9e5f762e78e26d2ae"
+    }
+  ]
+}

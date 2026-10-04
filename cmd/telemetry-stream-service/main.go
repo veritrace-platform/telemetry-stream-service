@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -18,7 +19,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
-	"github.com/veritrace-platform/telemetry-stream-service/internal/httpapi"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/app"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/admin"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/buildinfo"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/config"
@@ -32,7 +33,7 @@ import (
 const usage = `Usage: telemetry-stream-service <command>
 
 Commands:
-  serve                      Run the REST API and the admin server
+  serve                      Run the REST API, the admin server, and the components in COMPONENTS
   migrate up|down|status     Manage the database schema
   healthcheck                Probe the local admin server (container health checks)
   version                    Print the build version
@@ -83,6 +84,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err := cfg.ValidateServe(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
+	appCfg, err := app.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+	if err := appCfg.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
 
 	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL, buildinfo.ServiceName)
 	if err != nil {
@@ -96,17 +104,33 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 
-	readiness := admin.NewReadiness(map[string]admin.Check{"postgres": pool.Ping}, 2*time.Second)
+	deps := app.Dependencies{Logger: logger, Registerer: registry, Pool: pool}
+	api, err := app.NewAPI(appCfg, deps)
+	if err != nil {
+		return err
+	}
+	workers, err := app.NewWorkers(appCfg, deps, api.Hub)
+	if err != nil {
+		return err
+	}
+	defer workers.Close()
+
+	checks := map[string]admin.Check{"postgres": pool.Ping}
+	maps.Copy(checks, workers.Checks())
+	maps.Copy(checks, api.Checks)
+	readiness := admin.NewReadiness(checks, 2*time.Second)
 
 	apiServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger, registry),
+		Handler:           api.Handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		// No server-wide read or write timeout: WebSocket connections are long-lived and manage their own
 		// deadlines; REST handlers are bounded per request.
 		IdleTimeout: 120 * time.Second,
 		ErrorLog:    slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
+	// The server does not track hijacked WebSocket connections; the hub closes them with 1001 at shutdown.
+	apiServer.RegisterOnShutdown(api.Hub.Shutdown)
 	adminServer := &http.Server{
 		Addr:              cfg.AdminAddr,
 		Handler:           admin.NewHandler(readiness, registry),
@@ -114,9 +138,21 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
 
-	logger.InfoContext(ctx, "starting", slog.String("env", cfg.Env))
-	if err := server.Run(ctx, logger, cfg.ShutdownTimeout, readiness.SetDraining, apiServer, adminServer); err != nil {
-		return err
+	// Offsets and MQTT acknowledgements follow persistence, so work interrupted at shutdown is redone at the next
+	// start.
+	workersCtx, stopWorkers := context.WithCancel(ctx)
+	workersDone := make(chan struct{})
+	go func() {
+		defer close(workersDone)
+		workers.Run(workersCtx)
+	}()
+
+	logger.InfoContext(ctx, "starting", slog.String("env", cfg.Env), slog.Any("components", appCfg.Components))
+	runErr := server.Run(ctx, logger, cfg.ShutdownTimeout, readiness.SetDraining, apiServer, adminServer)
+	stopWorkers()
+	<-workersDone
+	if runErr != nil {
+		return runErr
 	}
 	logger.InfoContext(ctx, "stopped")
 	return nil

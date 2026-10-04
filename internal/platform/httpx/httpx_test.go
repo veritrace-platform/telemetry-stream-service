@@ -26,6 +26,7 @@ func newRouter(t *testing.T, logs *bytes.Buffer, registry *prometheus.Registry) 
 	r.NotFound(httpx.NotFound)
 	r.MethodNotAllowed(httpx.MethodNotAllowed)
 	r.Get("/items/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	r.Patch("/items/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	r.Get("/panic", func(http.ResponseWriter, *http.Request) { panic("boom") })
 	return r
 }
@@ -73,6 +74,28 @@ func TestMethodNotAllowedReturnsProblem(t *testing.T) {
 	}
 	if p := decodeProblem(t, rec); p.Code != httpx.CodeMethodNotAllowed {
 		t.Errorf("code = %q, want %q", p.Code, httpx.CodeMethodNotAllowed)
+	}
+	if allow := rec.Header().Get("Allow"); allow != "GET, PATCH" {
+		t.Errorf("Allow = %q, want the methods of the route", allow)
+	}
+}
+
+func TestSecureHeaders(t *testing.T) {
+	handler := httpx.SecureHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/keys" {
+			w.Header().Set("Cache-Control", "public, max-age=300")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for path, cacheControl := range map[string]string{"/items": "no-store", "/keys": "public, max-age=300"} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := rec.Header().Get("Cache-Control"); got != cacheControl {
+			t.Errorf("%s: Cache-Control = %q, want %q", path, got, cacheControl)
+		}
+		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("%s: X-Content-Type-Options = %q, want nosniff", path, got)
+		}
 	}
 }
 
@@ -135,5 +158,26 @@ func TestMetricsRecordsRequests(t *testing.T) {
 
 	if n := testutil.CollectAndCount(registry, "veritrace_test_http_request_duration_seconds"); n != 1 {
 		t.Errorf("series count = %d, want 1", n)
+	}
+}
+
+func TestProblemExtensionMembers(t *testing.T) {
+	p := httpx.NewProblem(http.StatusUnprocessableEntity, "OUT_OF_AREA", "position outside the area")
+	p.Extensions = map[string]any{"distance_meters": 412.5, "allowed_meters": 212}
+	rec := httptest.NewRecorder()
+	httpx.WriteProblem(rec, httptest.NewRequest(http.MethodPost, "/api/v1/things", nil), p)
+
+	var got map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got["code"] != "OUT_OF_AREA" || got["instance"] != "/api/v1/things" || got["distance_meters"] != 412.5 ||
+		got["allowed_meters"] != 212.0 || len(got) != 8 {
+		t.Errorf("problem = %v, want the standard members and both extensions", got)
+	}
+
+	b, err := json.Marshal(httpx.NewProblem(http.StatusNotFound, httpx.CodeNotFound, "missing"))
+	if err != nil || string(b) != `{"type":"about:blank","title":"Not Found","status":404,"code":"NOT_FOUND","detail":"missing"}` {
+		t.Errorf("without extensions: %s, %v", b, err)
 	}
 }

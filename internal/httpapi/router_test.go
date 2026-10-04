@@ -17,9 +17,9 @@ import (
 
 func TestMiddlewareAppliesWithoutRoutes(t *testing.T) {
 	registry := prometheus.NewRegistry()
-	router := httpapi.NewRouter(slog.New(slog.DiscardHandler), registry)
+	router := httpapi.NewRouter(slog.New(slog.DiscardHandler), registry, httpapi.Mounts{})
 
-	for _, path := range []string{"/", "/api/v1/shipments"} {
+	for _, path := range []string{"/", "/api/v1/shipments", "/.well-known/jwks.json"} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 
@@ -29,6 +29,10 @@ func TestMiddlewareAppliesWithoutRoutes(t *testing.T) {
 		var p httpx.Problem
 		if err := json.NewDecoder(rec.Body).Decode(&p); err != nil {
 			t.Fatalf("%s: decode problem: %v", path, err)
+		}
+		if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: Cache-Control = %q, X-Content-Type-Options = %q", path, rec.Header().Get("Cache-Control"),
+				rec.Header().Get("X-Content-Type-Options"))
 		}
 		if p.TraceID == "" || p.TraceID != rec.Header().Get(httpx.TraceHeader) {
 			t.Errorf("%s: trace_id = %q, X-Trace-Id = %q; want equal and non-empty", path, p.TraceID, rec.Header().Get(httpx.TraceHeader))
@@ -40,20 +44,35 @@ func TestMiddlewareAppliesWithoutRoutes(t *testing.T) {
 	}
 }
 
-func TestRegisteredRoutesAreServedUnderVersionPrefix(t *testing.T) {
-	router := httpapi.NewRouter(slog.New(slog.DiscardHandler), prometheus.NewRegistry(), func(r chi.Router) {
-		r.Get("/ping", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+func TestMountedRoutesAreServedUnderTheirPrefix(t *testing.T) {
+	noContent := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
+	router := httpapi.NewRouter(slog.New(slog.DiscardHandler), prometheus.NewRegistry(), httpapi.Mounts{
+		API:       []httpapi.Routes{func(r chi.Router) { r.Get("/ping", noContent) }},
+		WellKnown: []httpapi.Routes{func(r chi.Router) { r.Get("/jwks.json", noContent) }},
+		WebSocket: []httpapi.Routes{func(r chi.Router) { r.Get("/notifications", noContent) }},
 	})
 
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/ping", nil))
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", rec.Code)
+	tests := []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/api/v1/ping", http.StatusNoContent},
+		{http.MethodPost, "/api/v1/ping", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/.well-known/jwks.json", http.StatusNoContent},
+		{http.MethodGet, "/.well-known/other", http.StatusNotFound},
+		{http.MethodGet, "/ws/v1/notifications", http.StatusNoContent},
+		{http.MethodGet, "/ws/v1/other", http.StatusNotFound},
+		{http.MethodGet, "/ping", http.StatusNotFound},
 	}
-
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/ping", nil))
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("POST status = %d, want 405", rec.Code)
+	for _, tt := range tests {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
+		if rec.Code != tt.want {
+			t.Errorf("%s %s: status = %d, want %d", tt.method, tt.path, rec.Code, tt.want)
+		}
+		// Routes in mounted trees name their methods in the Allow header of a 405 too.
+		if tt.want == http.StatusMethodNotAllowed && rec.Header().Get("Allow") != http.MethodGet {
+			t.Errorf("%s %s: Allow = %q, want GET", tt.method, tt.path, rec.Header().Get("Allow"))
+		}
 	}
 }

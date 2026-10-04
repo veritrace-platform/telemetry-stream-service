@@ -1,0 +1,32 @@
+{
+  "description": "GS1 key validation vectors: length, digits, Modulo 10 check digit, and prefix ownership. Shared by every Go and TypeScript implementation; see docs/domain/gs1-identifiers.md. Checks run in the order LENGTH, NON_NUMERIC, CHECK_DIGIT, PREFIX_MISMATCH, and the first failure is the reason.",
+  "valid": [
+    { "key": "6291041500213", "type": "GTIN-13", "note": "GS1 published example" },
+    { "key": "8930001001015", "type": "GLN" },
+    { "key": "8934567000017", "type": "GLN" },
+    { "key": "08930001000018", "type": "GTIN-14" },
+    { "key": "08934567001014", "type": "GTIN-14" },
+    { "key": "089300010000000018", "type": "SSCC" },
+    { "key": "089345670000000017", "type": "SSCC" }
+  ],
+  "invalid": [
+    { "key": "08930001000015", "type": "GTIN-14", "reason": "CHECK_DIGIT" },
+    { "key": "8930001001016", "type": "GLN", "reason": "CHECK_DIGIT" },
+    { "key": "893000100101", "type": "GLN", "reason": "LENGTH" },
+    { "key": "89300010010A5", "type": "GLN", "reason": "NON_NUMERIC" },
+    { "key": "", "type": "GLN", "reason": "LENGTH" }
+  ],
+  "prefix_ownership": {
+    "valid": [
+      { "key": "8930001001015", "type": "GLN", "gcp": "8930001" },
+      { "key": "08930001000018", "type": "GTIN-14", "gcp": "8930001" },
+      { "key": "18930001000015", "type": "GTIN-14", "gcp": "8930001", "note": "packaging level indicator 1" }
+    ],
+    "invalid": [
+      { "key": "8934567000017", "type": "GLN", "gcp": "8930001", "reason": "PREFIX_MISMATCH" },
+      { "key": "8934567000018", "type": "GLN", "gcp": "8930001", "reason": "CHECK_DIGIT", "note": "the check digit is verified before the prefix" },
+      { "key": "08934567001014", "type": "GTIN-14", "gcp": "8930001", "reason": "PREFIX_MISMATCH" },
+      { "key": "89300010000012", "type": "GTIN-14", "gcp": "8930001", "reason": "PREFIX_MISMATCH", "note": "the prefix must follow the indicator digit" }
+    ]
+  }
+}
