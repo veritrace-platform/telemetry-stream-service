@@ -474,20 +474,31 @@ components:
           type: integer
           description: Incidents confirmed in the last 24 hours, open or resolved.
     NotificationMessage:
+      description: |
+        A server message on the notification WebSocket (`messaging.md` §6.1). Its `type` decides the shape of `data`,
+        so generated clients get one variant per type.
+      oneOf:
+        - $ref: "#/components/schemas/BreachConfirmedMessage"
+        - $ref: "#/components/schemas/BreachResolvedMessage"
+        - $ref: "#/components/schemas/RecallMessage"
+        - $ref: "#/components/schemas/ReadingMessage"
+        - $ref: "#/components/schemas/SubscriptionMessage"
+        - $ref: "#/components/schemas/ErrorMessage"
+      discriminator:
+        propertyName: type
+        mapping:
+          cold_chain.breach_confirmed: "#/components/schemas/BreachConfirmedMessage"
+          cold_chain.breach_resolved: "#/components/schemas/BreachResolvedMessage"
+          shipment.recalled: "#/components/schemas/RecallMessage"
+          telemetry.reading: "#/components/schemas/ReadingMessage"
+          subscribed: "#/components/schemas/SubscriptionMessage"
+          unsubscribed: "#/components/schemas/SubscriptionMessage"
+          error: "#/components/schemas/ErrorMessage"
+    NotificationEnvelope:
       type: object
-      description: A server message on the notification WebSocket (`messaging.md` §6.1).
-      required: [type, id, sent_at, data]
+      description: The members that every server message has besides `type` and `data`.
+      required: [id, sent_at]
       properties:
-        type:
-          type: string
-          enum:
-            - cold_chain.breach_confirmed
-            - cold_chain.breach_resolved
-            - shipment.recalled
-            - telemetry.reading
-            - subscribed
-            - unsubscribed
-            - error
         id:
           type: string
           format: uuid
@@ -495,14 +506,72 @@ components:
         sent_at:
           type: string
           format: date-time
-        data:
-          oneOf:
-            - $ref: "#/components/schemas/NotificationBreachConfirmed"
-            - $ref: "#/components/schemas/NotificationBreachResolved"
-            - $ref: "#/components/schemas/NotificationRecall"
-            - $ref: "#/components/schemas/NotificationReading"
-            - $ref: "#/components/schemas/NotificationSubscription"
-            - $ref: "#/components/schemas/NotificationError"
+    BreachConfirmedMessage:
+      allOf:
+        - $ref: "#/components/schemas/NotificationEnvelope"
+        - type: object
+          required: [type, data]
+          properties:
+            type:
+              type: string
+              enum: [cold_chain.breach_confirmed]
+            data:
+              $ref: "#/components/schemas/NotificationBreachConfirmed"
+    BreachResolvedMessage:
+      allOf:
+        - $ref: "#/components/schemas/NotificationEnvelope"
+        - type: object
+          required: [type, data]
+          properties:
+            type:
+              type: string
+              enum: [cold_chain.breach_resolved]
+            data:
+              $ref: "#/components/schemas/NotificationBreachResolved"
+    RecallMessage:
+      allOf:
+        - $ref: "#/components/schemas/NotificationEnvelope"
+        - type: object
+          required: [type, data]
+          properties:
+            type:
+              type: string
+              enum: [shipment.recalled]
+            data:
+              $ref: "#/components/schemas/NotificationRecall"
+    ReadingMessage:
+      allOf:
+        - $ref: "#/components/schemas/NotificationEnvelope"
+        - type: object
+          required: [type, data]
+          properties:
+            type:
+              type: string
+              enum: [telemetry.reading]
+            data:
+              $ref: "#/components/schemas/NotificationReading"
+    SubscriptionMessage:
+      allOf:
+        - $ref: "#/components/schemas/NotificationEnvelope"
+        - type: object
+          required: [type, data]
+          properties:
+            type:
+              type: string
+              enum: [subscribed, unsubscribed]
+            data:
+              $ref: "#/components/schemas/NotificationSubscription"
+    ErrorMessage:
+      allOf:
+        - $ref: "#/components/schemas/NotificationEnvelope"
+        - type: object
+          required: [type, data]
+          properties:
+            type:
+              type: string
+              enum: [error]
+            data:
+              $ref: "#/components/schemas/NotificationError"
     NotificationBreachConfirmed:
       type: object
       description: "`cold_chain.breach_confirmed`: the event data of `messaging.md` §5 with the shipment's product."
