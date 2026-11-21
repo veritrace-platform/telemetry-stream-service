@@ -3,6 +3,7 @@ package forecast_test
 import (
 	"math"
 	"math/rand/v2"
+	"slices"
 	"testing"
 	"time"
 
@@ -279,5 +280,81 @@ func TestRulesHoldAcrossNoise(t *testing.T) {
 				t.Errorf("%s, noise draw %d: decisions %q, want %q", shape.name, seed, got, shape.want)
 			}
 		}
+	}
+}
+
+// TestRecoveryAfterALongBreachDoesNotWarn replays a reefer that fails for three hours. The detector closes the
+// open warning when a breach is confirmed, 30 s into an excursion; afterwards the load recovers toward what the
+// reefer held before the breach, which no in-bounds reading of the last 30 minutes shows, and that recovery must not
+// warn about the minimum.
+func TestRecoveryAfterALongBreachDoesNotWarn(t *testing.T) {
+	for seed := range uint64(20) {
+		f := forecast.New(chilled)
+		var issued []forecast.Bound
+		var excursion time.Time
+		for _, r := range trace(2000+seed, 0.15,
+			phase{duration: 10 * time.Minute, start: 4.5, end: 4.5},
+			phase{duration: 30 * time.Minute, start: 4.5, end: 22},
+			phase{duration: 3 * time.Hour, start: 22, end: 22},
+			phase{duration: 30 * time.Minute, start: 22, end: 5},
+			phase{duration: 10 * time.Minute, start: 5, end: 5},
+		) {
+			if d, w := f.Step(r); d == forecast.Issue {
+				issued = append(issued, w.Bound)
+			}
+			switch {
+			case chilled.Contains(r.Celsius):
+				excursion = time.Time{}
+			case excursion.IsZero():
+				excursion = r.At
+			case r.At.Sub(excursion) >= 30*time.Second:
+				f.Close() // the breach is confirmed
+			}
+		}
+		if len(issued) == 0 || slices.Contains(issued, forecast.Min) {
+			t.Errorf("noise draw %d: warnings about %v, want the maximum only", seed, issued)
+		}
+	}
+}
+
+func TestLevelSeedsAndKeepsTheLastInBoundsReadings(t *testing.T) {
+	f := forecast.New(chilled)
+	seed := make([]float64, forecast.LevelReadings+40)
+	for i := range seed {
+		seed[i] = 9 // out of the level: older than its readings
+	}
+	for i := 40; i < len(seed); i++ {
+		seed[i] = 4.5
+	}
+	f.SeedLevel(seed)
+	if f.Level() != 4.5 {
+		t.Errorf("Level() after SeedLevel() = %v", f.Level())
+	}
+	// Out-of-bounds readings do not move the level, however long they last.
+	at := t0
+	for range 2 * forecast.LevelReadings {
+		at = at.Add(5 * time.Second)
+		f.Step(forecast.Reading{At: at, Celsius: 15})
+	}
+	if f.Level() != 4.5 {
+		t.Errorf("Level() after a long excursion = %v", f.Level())
+	}
+}
+
+func TestLevelIsWhereTheReadingsCluster(t *testing.T) {
+	// 250 steady readings around 4.2 °C and 110 on the ramps of a door opening up to 7.5 °C: the median would sit
+	// above the steady readings, the level does not.
+	var temperatures []float64
+	rng := rand.New(rand.NewPCG(3, 4))
+	for range 250 {
+		temperatures = append(temperatures, 4.2+rng.NormFloat64()*0.1)
+	}
+	for i := range 110 {
+		temperatures = append(temperatures, 4.2+3.3*float64(i)/110)
+	}
+	f := forecast.New(chilled)
+	f.SeedLevel(temperatures)
+	if level := f.Level(); math.Abs(level-4.2) > 0.05 {
+		t.Errorf("Level() = %.2f, want about 4.2", level)
 	}
 }

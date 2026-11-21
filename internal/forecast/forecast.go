@@ -18,8 +18,12 @@ const (
 	MinSpan     = time.Minute
 	// MaxGap is the longest silence within a trend: the gap limit of the breach rule.
 	MaxGap = 15 * time.Second
-	// LevelWindow is how far back the in-bounds readings of the operating level reach.
-	LevelWindow = 30 * time.Minute
+	// LevelReadings is how many of the last in-bounds readings the operating level takes: 30 minutes at the
+	// nominal interval of 5 s. Counting readings rather than minutes keeps the level of a load that was out of bounds
+	// for hours at what the reefer held before.
+	LevelReadings = 360
+	// LevelBin is the width, in °C, of the bins that find where those readings cluster.
+	LevelBin = 0.5
 	// RecentWindow is how far back the readings of the current temperature reach.
 	RecentWindow = time.Minute
 	// MinDeparture is how far, in °C, the current temperature must have moved from the operating level toward a

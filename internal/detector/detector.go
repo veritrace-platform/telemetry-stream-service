@@ -26,7 +26,7 @@ import (
 )
 
 // History is how far back the database is read to rebuild an episode (cold-chain-monitoring.md §6). The forecast is
-// rebuilt from the readings of forecast.LevelWindow (§7.4).
+// rebuilt from the readings of its window and the last forecast.LevelReadings in-bounds readings before it (§7.4).
 const History = 60 * time.Second
 
 // Producer writes records and waits for them to be acknowledged, as *kgo.Client does.
@@ -173,9 +173,9 @@ func (d *Detector) evaluate(ctx context.Context, inputs []Input) error {
 // rebuild returns the state of a shipment as the database records it before first, the time of the first new
 // reading. The episode starts from the SSCC's latest incident, and the readings of the last minute are evaluated
 // again; their changes are applied too, so an incident that a failed batch confirmed or resolved without committing
-// is caught up, and incidents that exist are left as they are. The forecast continues the SSCC's open warning, and
-// the readings of the last 30 minutes fill its window and operating level without issuing or clearing warnings
-// (cold-chain-monitoring.md §7.4).
+// is caught up, and incidents that exist are left as they are. The forecast continues the SSCC's open warning; the
+// last in-bounds readings before its window fill the operating level, and the readings of the window are observed
+// without issuing or clearing warnings (cold-chain-monitoring.md §7.4).
 func (d *Detector) rebuild(ctx context.Context, tx pgx.Tx, s projection.Shipment, first time.Time, b *batch) (*tracker, error) {
 	tr := &tracker{
 		episode:  NewEpisode(s.SSCC, s.ShipmentID, Bounds{Min: s.MinTempCelsius, Max: s.MaxTempCelsius}),
@@ -203,7 +203,18 @@ func (d *Detector) rebuild(ctx context.Context, tx pgx.Tx, s projection.Shipment
 		w := open.Forecast()
 		tr.forecast.Seed(&w)
 	}
-	history, err := reading.Between(ctx, tx, s.SSCC, first.Add(-forecast.LevelWindow), first)
+	// The window reaches further back than the episode's history; both are read at once.
+	windowStart := first.Add(-forecast.Window)
+	if from.Before(windowStart) {
+		windowStart = from
+	}
+	level, err := reading.InBoundsBefore(ctx, tx, s.SSCC, windowStart, s.MinTempCelsius, s.MaxTempCelsius,
+		forecast.LevelReadings)
+	if err != nil {
+		return nil, err
+	}
+	tr.forecast.SeedLevel(level)
+	history, err := reading.Between(ctx, tx, s.SSCC, windowStart, first)
 	if err != nil {
 		return nil, err
 	}

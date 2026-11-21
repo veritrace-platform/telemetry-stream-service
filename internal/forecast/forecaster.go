@@ -43,10 +43,10 @@ const (
 // at an excursion or clear the open warning, and the open warning.
 type Forecaster struct {
 	bounds Bounds
-	// window holds the readings of the last Window, and level the in-bounds readings of the last LevelWindow,
-	// oldest first.
+	// window holds the readings of the last Window, and level the temperatures of the last LevelReadings in-bounds
+	// readings, oldest first.
 	window []Point
-	level  []Point
+	level  []float64
 	// last is the time of the last reading added; zero before the first.
 	last time.Time
 	// pointing counts consecutive readings that point at an excursion of the bound pointingAt.
@@ -78,6 +78,12 @@ func (f *Forecaster) Open() (Warning, bool) {
 		return Warning{}, false
 	}
 	return *f.open, true
+}
+
+// SeedLevel fills the operating level with the temperatures of earlier in-bounds readings, oldest first, as a
+// rebuild does before it observes the readings of the window.
+func (f *Forecaster) SeedLevel(temperatures []float64) {
+	f.level = append(f.level[:0], temperatures[max(0, len(temperatures)-LevelReadings):]...)
 }
 
 // Close forgets the open warning, which a breach closed.
@@ -130,9 +136,11 @@ func (f *Forecaster) add(r Reading) bool {
 	f.last = r.At
 	p := Point{At: r.At, Celsius: r.Celsius}
 	f.window = append(trim(f.window, r.At.Add(-Window)), p)
-	f.level = trim(f.level, r.At.Add(-LevelWindow))
 	if f.bounds.Contains(r.Celsius) {
-		f.level = append(f.level, p)
+		if len(f.level) == LevelReadings {
+			f.level = f.level[1:]
+		}
+		f.level = append(f.level, r.Celsius)
 	}
 	return true
 }
@@ -147,13 +155,31 @@ func trim(points []Point, cut time.Time) []Point {
 	return points[i:]
 }
 
-// Level returns the operating level: the median temperature of the in-bounds readings of the last LevelWindow.
+// Level returns the operating level: where the last LevelReadings in-bounds readings cluster most. It is the median
+// of the readings within LevelBin of the center of the densest LevelBin-wide bin, so the ramps of excursions, which
+// pass through many bins quickly, do not move it, while the readings of a steady reefer, which share a bin or two,
+// set it.
 func (f *Forecaster) Level() float64 {
-	values := make([]float64, len(f.level))
-	for i, p := range f.level {
-		values[i] = p.Celsius
+	if len(f.level) == 0 {
+		return 0
 	}
-	return median(values)
+	counts := map[int]int{}
+	densest, most := 0, 0
+	for _, v := range f.level {
+		b := int(math.Floor(v / LevelBin))
+		counts[b]++
+		if c := counts[b]; c > most || (c == most && b < densest) {
+			densest, most = b, c
+		}
+	}
+	center := (float64(densest) + 0.5) * LevelBin
+	var near []float64
+	for _, v := range f.level {
+		if math.Abs(v-center) <= LevelBin {
+			near = append(near, v)
+		}
+	}
+	return median(near)
 }
 
 // Current returns the current temperature: the median of the readings of the last RecentWindow.
