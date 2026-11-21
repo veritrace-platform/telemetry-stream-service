@@ -43,8 +43,8 @@ const (
 // at an excursion or clear the open warning, and the open warning.
 type Forecaster struct {
 	bounds Bounds
-	// window holds the readings of the last Window, and level the temperatures of the last LevelReadings in-bounds
-	// readings, oldest first.
+	// window holds the in-bounds readings of the last Window since the last excursion or gap, and level the
+	// temperatures of the last LevelReadings in-bounds readings, oldest first.
 	window []Point
 	level  []float64
 	// last is the time of the last reading added; zero before the first.
@@ -107,7 +107,7 @@ func (f *Forecaster) Step(r Reading) (Decision, Warning) {
 	if !f.add(r) {
 		return None, Warning{}
 	}
-	// Out of bounds, the breach rule decides; both counts start again.
+	// Out of bounds, the breach rule decides; the window and both counts start again.
 	if !f.bounds.Contains(r.Celsius) {
 		f.pointing, f.clearing = 0, 0
 		return None, Warning{}
@@ -123,8 +123,9 @@ func (f *Forecaster) Step(r Reading) (Decision, Warning) {
 	return f.considerClear(trend)
 }
 
-// add appends a reading to the window and, if it lies within the bounds, to the level. A gap longer than MaxGap
-// empties the window and restarts the counts; the level and the open warning stay.
+// add appends a reading that lies within the bounds to the window and the level. A reading out of bounds, or a gap
+// longer than MaxGap, empties the window and restarts the counts, so the trend is always that of in-bounds readings
+// since the last excursion; the level and the open warning stay.
 func (f *Forecaster) add(r Reading) bool {
 	if !f.last.IsZero() && !r.At.After(f.last) {
 		return false
@@ -134,14 +135,15 @@ func (f *Forecaster) add(r Reading) bool {
 		f.pointing, f.clearing = 0, 0
 	}
 	f.last = r.At
-	p := Point{At: r.At, Celsius: r.Celsius}
-	f.window = append(trim(f.window, r.At.Add(-Window)), p)
-	if f.bounds.Contains(r.Celsius) {
-		if len(f.level) == LevelReadings {
-			f.level = f.level[1:]
-		}
-		f.level = append(f.level, r.Celsius)
+	if !f.bounds.Contains(r.Celsius) {
+		f.window = f.window[:0]
+		return true
 	}
+	f.window = append(trim(f.window, r.At.Add(-Window)), Point{At: r.At, Celsius: r.Celsius})
+	if len(f.level) == LevelReadings {
+		f.level = f.level[1:]
+	}
+	f.level = append(f.level, r.Celsius)
 	return true
 }
 

@@ -358,3 +358,35 @@ func TestLevelIsWhereTheReadingsCluster(t *testing.T) {
 		t.Errorf("Level() = %.2f, want about 4.2", level)
 	}
 }
+
+// TestABreachThatEndsAtOnceDoesNotWarnAgain is the end of the acceptance run: the load warms, breaches for 40 s, and
+// is back at 5 °C at once. The readings of the breach are no trend of in-bounds readings, so they cannot make the
+// readings at 5 °C point at the maximum.
+func TestABreachThatEndsAtOnceDoesNotWarnAgain(t *testing.T) {
+	for seed := range uint64(200) {
+		var issued int
+		f := forecast.New(chilled)
+		var excursion time.Time
+		for _, r := range trace(3000+seed, 0.05,
+			phase{duration: 45 * time.Second, start: 4.5, end: 4.5},
+			phase{duration: 120 * time.Second, start: 4.5, end: 8.4},
+			phase{duration: 40 * time.Second, start: 9.5, end: 11},
+			phase{duration: 3 * time.Minute, start: 5, end: 5},
+		) {
+			if d, _ := f.Step(r); d == forecast.Issue {
+				issued++
+			}
+			switch {
+			case chilled.Contains(r.Celsius):
+				excursion = time.Time{}
+			case excursion.IsZero():
+				excursion = r.At
+			case r.At.Sub(excursion) >= 30*time.Second:
+				f.Close()
+			}
+		}
+		if issued != 1 {
+			t.Errorf("noise draw %d: %d warnings, want the one before the breach", seed, issued)
+		}
+	}
+}
