@@ -240,8 +240,17 @@ func TestThermalExposure(t *testing.T) {
 	t.Run("without the lot's dates, no shelf life", func(t *testing.T) {
 		var got api.ThermalExposure
 		f.get(t, admin, "/telemetry/shipments/"+legacy.SSCC+"/thermal-exposure", nil, &got)
-		if got.ShelfLife != nil || got.ReadingCount != 25 {
+		if got.ShelfLife != nil || got.ReadingCount != 25 || got.MonitoringEnded {
 			t.Errorf("exposure = %+v", got)
+		}
+		// A shipment that ended before the projection recorded when monitoring ends has only its status to tell.
+		if _, err := f.db.Owner.Exec(t.Context(), `UPDATE telemetry.shipment_projection SET status = 'DELIVERED' WHERE sscc = $1`,
+			legacy.SSCC); err != nil {
+			t.Fatal(err)
+		}
+		f.get(t, admin, "/telemetry/shipments/"+legacy.SSCC+"/thermal-exposure", nil, &got)
+		if !got.MonitoringEnded || !got.AssessedAt.Equal(f.now) {
+			t.Errorf("exposure of a shipment delivered before the upgrade = %+v", got)
 		}
 	})
 

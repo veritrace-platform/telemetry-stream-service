@@ -40,6 +40,15 @@ type Shipment struct {
 	MonitoringEndedAt *time.Time
 }
 
+// monitoringEnded tells whether the shipment had stopped being monitored by until. A shipment that stopped before
+// the projection recorded when monitoring ends has only its status to tell.
+func (s Shipment) monitoringEnded(until time.Time) bool {
+	if s.MonitoringEndedAt != nil {
+		return !s.MonitoringEndedAt.After(until)
+	}
+	return s.Status != "" && s.Status != "CREATED" && s.Status != "IN_TRANSIT"
+}
+
 // Exposure is a shipment's thermal exposure as of a time.
 type Exposure struct {
 	SSCC string
@@ -83,7 +92,7 @@ func Measure(ctx context.Context, db queries.DBTX, s Shipment, until time.Time) 
 		return Exposure{}, fmt.Errorf("measure thermal exposure of %s: %w", s.SSCC, err)
 	}
 	e := Exposure{
-		SSCC: s.SSCC, AssessedAt: until, MonitoringEnded: s.MonitoringEndedAt != nil && !s.MonitoringEndedAt.After(until),
+		SSCC: s.SSCC, AssessedAt: until, MonitoringEnded: s.monitoringEnded(until),
 		MinTempCelsius: s.MinTempCelsius, MaxTempCelsius: s.MaxTempCelsius, ReadingCount: int(row.ReadingCount),
 		CoveredSeconds: row.CoveredSeconds, UncoveredSeconds: row.UncoveredSeconds,
 		TimeAboveMaxSeconds: row.AboveMaxSeconds, TimeBelowMinSeconds: row.BelowMinSeconds,
