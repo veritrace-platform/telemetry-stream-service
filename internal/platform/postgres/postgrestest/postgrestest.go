@@ -15,7 +15,7 @@ import (
 )
 
 // Image matches the image used by the local environment in platform-infrastructure.
-const Image = "timescale/timescaledb:2.30.1-pg18"
+const Image = "timescale/timescaledb:2.31.0-pg18"
 
 // Database describes a service database provisioned like the infrastructure bootstrap does.
 type Database struct {
