@@ -9,7 +9,6 @@ package incident
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -17,22 +16,20 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gowebpki/jcs"
+
+	"github.com/veritrace-platform/telemetry-stream-service/internal/envelope"
 )
 
 // Kafka topic and event types (messaging.md §5).
 const (
 	Topic               = "telemetry.incidents"
-	Producer            = "telemetry-stream-service"
+	Producer            = envelope.Producer
 	TypeBreachConfirmed = "cold_chain.breach_confirmed"
 	TypeBreachResolved  = "cold_chain.breach_resolved"
-	eventVersion        = 1
 )
 
 // TimeLayout formats incident times, which are device times with milliseconds (messaging.md §5).
-const TimeLayout = "2006-01-02T15:04:05.000Z07:00"
-
-// occurredAtLayout formats the envelope's occurred_at with six fractional digits (messaging.md §2.1).
-const occurredAtLayout = "2006-01-02T15:04:05.000000Z07:00"
+const TimeLayout = envelope.TimeLayout
 
 // Incident is a breached episode of one shipment.
 type Incident struct {
@@ -63,21 +60,7 @@ type Incident struct {
 // start, so the ID names the incident however often its breach is confirmed. The ID is a UUIDv7 with the start
 // time, so IDs sort by start.
 func NewID(sscc string, startedAt time.Time) uuid.UUID {
-	return derivedV7(startedAt, "incident|"+sscc+"|"+startedAt.UTC().Format(TimeLayout))
-}
-
-// derivedV7 returns a UUIDv7 with the millisecond timestamp of t and, instead of random bits, bits of the
-// SHA-256 of seed.
-func derivedV7(t time.Time, seed string) uuid.UUID {
-	sum := sha256.Sum256([]byte(seed))
-	var id uuid.UUID
-	var ms [8]byte
-	binary.BigEndian.PutUint64(ms[:], uint64(t.UnixMilli())) //nolint:gosec // device times are after 1970
-	copy(id[:6], ms[2:])
-	copy(id[6:], sum[:10])
-	id[6] = id[6]&0x0f | 0x70 // version 7
-	id[8] = id[8]&0x3f | 0x80 // RFC 9562 variant
-	return id
+	return envelope.DerivedV7(startedAt, "incident|"+sscc+"|"+startedAt.UTC().Format(TimeLayout))
 }
 
 // Duration returns the whole seconds from start to end.
