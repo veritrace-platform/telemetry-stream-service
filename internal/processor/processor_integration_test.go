@@ -16,6 +16,7 @@ import (
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/dbtest"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/detector"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/envelope"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/incident"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/processor"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/reading"
@@ -92,7 +93,7 @@ func TestProcessorConsumesRawReadings(t *testing.T) {
 // the breach, and produces cold_chain.breach_confirmed.
 func TestProcessorDetectsBreaches(t *testing.T) {
 	db := dbtest.Start(t)
-	brokers := kafkatest.Start(t, 6, reading.RawTopic, reading.DeadLetterTopic, incident.Topic)
+	brokers := kafkatest.Start(t, 6, reading.RawTopic, reading.DeadLetterTopic, incident.Topic, envelope.TopicForecasts)
 	producer, err := stream.NewProducer(brokers)
 	if err != nil {
 		t.Fatalf("NewProducer() error = %v", err)

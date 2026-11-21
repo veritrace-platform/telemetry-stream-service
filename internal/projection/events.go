@@ -64,6 +64,12 @@ type createdData struct {
 	MaxTempCelsius   *float64      `json:"max_temp_celsius"`
 	Participants     []participant `json:"participants"`
 	AssignedDriverID *uuid.UUID    `json:"assigned_driver_id"`
+	// The lot's dates and Q10, which events produced before they were added lack.
+	ProductionDate *string  `json:"production_date"`
+	ExpirationDate *string  `json:"expiration_date"`
+	ShelfLifeQ10   *float64 `json:"shelf_life_q10"`
+
+	productionDate, expirationDate *time.Time
 }
 
 type participant struct {
@@ -115,6 +121,12 @@ func decode(value []byte) (event, error) {
 		case e.created.MinTempCelsius == nil || e.created.MaxTempCelsius == nil:
 			missing = "min_temp_celsius or max_temp_celsius"
 		}
+		if e.created.productionDate, err = optionalDate(e.created.ProductionDate); err != nil {
+			return event{}, fmt.Errorf("%s production_date: %w", e.EventType, err)
+		}
+		if e.created.expirationDate, err = optionalDate(e.created.ExpirationDate); err != nil {
+			return event{}, fmt.Errorf("%s expiration_date: %w", e.EventType, err)
+		}
 	case typeParticipantAdded:
 		e.joined = &participant{}
 		if err := json.Unmarshal(e.Data, e.joined); err != nil {
@@ -138,6 +150,18 @@ func decode(value []byte) (event, error) {
 	return e, nil
 }
 
+// optionalDate parses a calendar date, if present, as midnight UTC.
+func optionalDate(value *string) (*time.Time, error) {
+	if value == nil {
+		return nil, nil
+	}
+	d, err := time.Parse(time.DateOnly, *value)
+	if err != nil {
+		return nil, fmt.Errorf("%q is not a date", *value)
+	}
+	return &d, nil
+}
+
 // result is what applying an event did.
 type result int
 
@@ -154,7 +178,9 @@ func (e event) apply(ctx context.Context, q *queries.Queries) (result, error) {
 	if e.created != nil {
 		return e.create(ctx, q)
 	}
-	params := queries.AdvanceParams{Sscc: e.Subject.SSCC, Status: e.Subject.Status, Sequence: e.Sequence}
+	params := queries.AdvanceParams{
+		Sscc: e.Subject.SSCC, Status: e.Subject.Status, Sequence: e.Sequence, OccurredAt: e.occurredAt,
+	}
 	switch {
 	case e.joined != nil:
 		params.JoinedTenantID = &e.joined.TenantID
@@ -186,7 +212,8 @@ func (e event) create(ctx context.Context, q *queries.Queries) (result, error) {
 		Sscc: e.Subject.SSCC, ShipmentID: e.Subject.ShipmentID, OwnerTenantID: data.OwnerTenantID,
 		ParticipantTenantIds: tenants, AssignedDriverID: data.AssignedDriverID, Status: e.Subject.Status,
 		Gtin: data.GTIN, ProductName: data.ProductName, LotNumber: data.LotNumber,
-		MinTempCelsius: *data.MinTempCelsius, MaxTempCelsius: *data.MaxTempCelsius, Sequence: e.Sequence,
+		MinTempCelsius: *data.MinTempCelsius, MaxTempCelsius: *data.MaxTempCelsius, ProductionDate: data.productionDate,
+		ExpirationDate: data.expirationDate, ShelfLifeQ10: data.ShelfLifeQ10, Sequence: e.Sequence,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("apply %s: %w", e.EventType, err)

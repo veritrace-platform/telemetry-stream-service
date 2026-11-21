@@ -16,9 +16,13 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/dbtest"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/envelope"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/exposure"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/forecast"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/incident"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/projection"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/reading"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/warning"
 )
 
 // vectorEvents returns the envelopes of testdata/shipment-events.json, a copy of
@@ -246,6 +250,139 @@ func TestProjector(t *testing.T) {
 		handle(t, delivered, recalled)
 		if len(producer.records) != 1 {
 			t.Errorf("events = %d, want still 1", len(producer.records))
+		}
+	})
+
+	t.Run("the lot's dates and Q10 are projected, and an open warning ends inconclusive with monitoring", func(t *testing.T) {
+		const sscc = "089300010000002012"
+		id := uuid.New()
+		created := rekey(events[0], id, sscc)
+		data := created["data"].(map[string]any)
+		data["production_date"], data["expiration_date"], data["shelf_life_q10"] = "2026-10-01", "2026-10-15", 2.5
+		handle(t, created, rekey(events[1], id, sscc), rekey(events[2], id, sscc))
+		s := get(t, sscc)
+		if s.ProductionDate == nil || s.ProductionDate.Format(time.DateOnly) != "2026-10-01" || s.ExpirationDate == nil ||
+			s.ExpirationDate.Format(time.DateOnly) != "2026-10-15" || s.ShelfLifeQ10 == nil || *s.ShelfLifeQ10 != 2.5 ||
+			s.MonitoringEndedAt != nil || s.ShelfLifeStatus != "INTACT" {
+			t.Fatalf("shipment = %+v", s)
+		}
+
+		start := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
+		var readings []reading.Reading
+		for i := range 13 {
+			at := start.Add(time.Duration(i) * 5 * time.Second)
+			readings = append(readings, reading.Reading{
+				DeviceID: "REEFER-0001", SSCC: sscc, RecordedAt: at, ReceivedAt: at, TemperatureCelsius: 5, Latitude: 10.8,
+				Longitude: 106.7,
+			})
+		}
+		if _, err := reading.NewStore(db.App).Insert(t.Context(), readings); err != nil {
+			t.Fatal(err)
+		}
+		open := warning.Warning{
+			ID: warning.NewID(sscc, start), ShipmentID: id, SSCC: sscc, DeviceID: "REEFER-0001", IssuedAt: start,
+			Bound: forecast.Max, BoundCelsius: 6, TemperatureCelsius: 5, SlopeCelsiusPerMinute: 0.4,
+			PredictedExcursionAt: start.Add(150 * time.Second),
+		}
+		if _, err := warning.NewStore(db.Owner).Insert(t.Context(), open); err != nil {
+			t.Fatal(err)
+		}
+		before := len(producer.records)
+		delivered := rekey(events[2], id, sscc)
+		delivered["event_type"], delivered["sequence"] = "shipment.delivery_confirmed", 4
+		delivered["occurred_at"] = start.Add(52 * time.Second).Format("2006-01-02T15:04:05.000000Z")
+		delivered["subject"].(map[string]any)["status"] = projection.StatusDelivered
+		handle(t, delivered)
+
+		s = get(t, sscc)
+		if s.MonitoringEndedAt == nil || !s.MonitoringEndedAt.Equal(start.Add(52*time.Second)) {
+			t.Errorf("monitoring_ended_at = %v", s.MonitoringEndedAt)
+		}
+		closed, found, err := warning.NewStore(db.Owner).Open(t.Context(), sscc)
+		if err != nil || found {
+			t.Fatalf("open warning after delivery = %+v, %v", closed, err)
+		}
+		if len(producer.records) != before+1 || producer.records[before].Topic != envelope.TopicForecasts {
+			t.Fatalf("events = %d, want one more on %s", len(producer.records)-before, envelope.TopicForecasts)
+		}
+		e, err := envelope.Decode(producer.records[before].Value)
+		var closure warning.Closure
+		if err == nil {
+			err = json.Unmarshal(e.Data, &closure)
+		}
+		if err != nil || e.EventType != warning.TypeClosed || closure.Outcome != warning.Inconclusive ||
+			closure.ClosedAt != start.Add(50*time.Second).Format(envelope.TimeLayout) {
+			t.Errorf("event = %+v, closure %+v, %v; want INCONCLUSIVE at the last reading before delivery", e, closure, err)
+		}
+
+		// A later status change does not move the end of monitoring.
+		recalled := rekey(events[3], id, sscc)
+		recalled["sequence"] = 5
+		recalled["occurred_at"] = start.Add(time.Hour).Format("2006-01-02T15:04:05.000000Z")
+		handle(t, recalled)
+		if s := get(t, sscc); !s.MonitoringEndedAt.Equal(start.Add(52 * time.Second)) {
+			t.Errorf("monitoring_ended_at after the recall = %v", s.MonitoringEndedAt)
+		}
+	})
+
+	t.Run("a breach resolved at the end of monitoring has its shelf-life cost assessed", func(t *testing.T) {
+		const sscc = "089300010000002029"
+		id := uuid.New()
+		created := rekey(events[0], id, sscc)
+		data := created["data"].(map[string]any)
+		data["production_date"], data["expiration_date"], data["shelf_life_q10"] = "2026-10-01", "2026-10-03", 3
+		handle(t, created, rekey(events[1], id, sscc), rekey(events[2], id, sscc))
+
+		// 30 minutes at 25 °C against a maximum of 6 °C: 30 × (3^1.9 − 1) ≈ 212 minutes, 4.9 % of three days.
+		start := time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)
+		var readings []reading.Reading
+		for i := range 121 {
+			at := start.Add(time.Duration(i) * 15 * time.Second)
+			readings = append(readings, reading.Reading{
+				DeviceID: "REEFER-0001", SSCC: sscc, RecordedAt: at, ReceivedAt: at, TemperatureCelsius: 25, Latitude: 10.8,
+				Longitude: 106.7,
+			})
+		}
+		if _, err := reading.NewStore(db.App).Insert(t.Context(), readings); err != nil {
+			t.Fatal(err)
+		}
+		open := incident.Incident{
+			ID: incident.NewID(sscc, start), ShipmentID: id, SSCC: sscc, DeviceID: "REEFER-0001", StartedAt: start,
+			ConfirmedAt: start.Add(30 * time.Second), MinTempCelsius: 2, MaxTempCelsius: 6, TriggerTemperatureCelsius: 25,
+			ExtremeTemperatureCelsius: 25, Latitude: 10.8, Longitude: 106.7,
+		}
+		open.IncidentHash, _ = open.Confirmation().Hash()
+		if _, err := incident.NewStore(db.Owner).Insert(t.Context(), open); err != nil {
+			t.Fatal(err)
+		}
+		before := len(producer.records)
+		delivered := rekey(events[2], id, sscc)
+		delivered["event_type"], delivered["sequence"] = "shipment.delivery_confirmed", 4
+		delivered["occurred_at"] = start.Add(31 * time.Minute).Format("2006-01-02T15:04:05.000000Z")
+		delivered["subject"].(map[string]any)["status"] = projection.StatusDelivered
+		handle(t, delivered)
+
+		var got []string
+		for _, r := range producer.records[before:] {
+			e, err := envelope.Decode(r.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, r.Topic+" "+e.EventType)
+			if e.EventType == exposure.TypeShelfLifeReduced {
+				var alert exposure.Alert
+				if err := json.Unmarshal(e.Data, &alert); err != nil || alert.Status != exposure.Reduced ||
+					alert.AssessedAt != start.Add(30*time.Minute).Format(envelope.TimeLayout) || alert.ShelfLifeLossPercent < 4 {
+					t.Errorf("alert = %+v, %v", alert, err)
+				}
+			}
+		}
+		want := []string{incident.Topic + " " + incident.TypeBreachResolved, envelope.TopicForecasts + " " + exposure.TypeShelfLifeReduced}
+		if !slices.Equal(got, want) {
+			t.Errorf("events = %v, want %v", got, want)
+		}
+		if s := get(t, sscc); s.ShelfLifeStatus != "REDUCED" {
+			t.Errorf("shelf_life_status = %s", s.ShelfLifeStatus)
 		}
 	})
 

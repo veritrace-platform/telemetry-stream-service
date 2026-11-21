@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -68,7 +69,8 @@ func (d *Database) Count(t testing.TB, query string, args ...any) int {
 }
 
 // Shipment is a projected shipment for fixtures. Zero fields take defaults: a new shipment ID, a new owner tenant
-// that is the only participant, status IN_TRANSIT, and bounds of 2 to 8 °C.
+// that is the only participant, status IN_TRANSIT, and bounds of 2 to 8 °C. The lot's dates and Q10 stay unset
+// unless given.
 type Shipment struct {
 	SSCC             string
 	ShipmentID       uuid.UUID
@@ -78,6 +80,9 @@ type Shipment struct {
 	Status           string
 	MinTempCelsius   float64
 	MaxTempCelsius   float64
+	ProductionDate   *time.Time
+	ExpirationDate   *time.Time
+	ShelfLifeQ10     *float64
 }
 
 // Project inserts a shipment into the projection as the owner and returns it with its defaults filled in.
@@ -101,10 +106,11 @@ func (d *Database) Project(t testing.TB, s Shipment) Shipment {
 	_, err := d.Owner.Exec(t.Context(), `
 		INSERT INTO telemetry.shipment_projection (
 			sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driver_id, status, gtin, product_name,
-			lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence)
-		VALUES ($1, $2, $3, $4, $5, $6, '08930001000018', 'Fresh milk 1 L', 'L2026-09-30A', $7, $8, 1)`,
+			lot_number, min_temp_celsius, max_temp_celsius, production_date, expiration_date, shelf_life_q10,
+			last_event_sequence)
+		VALUES ($1, $2, $3, $4, $5, $6, '08930001000018', 'Fresh milk 1 L', 'L2026-09-30A', $7, $8, $9, $10, $11, 1)`,
 		s.SSCC, s.ShipmentID, s.OwnerTenantID, s.Participants, s.AssignedDriverID, s.Status, s.MinTempCelsius,
-		s.MaxTempCelsius)
+		s.MaxTempCelsius, s.ProductionDate, s.ExpirationDate, s.ShelfLifeQ10)
 	if err != nil {
 		t.Fatalf("project shipment %s: %v", s.SSCC, err)
 	}

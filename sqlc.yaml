@@ -29,6 +29,15 @@ sql:
               import: time
               type: Time
               pointer: true
+          # Dates are calendar days, which pgx reads as midnight UTC.
+          - db_type: date
+            go_type: time.Time
+          - db_type: date
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
           # Numeric values (coordinates, temperatures) have at most 9 digits, which a float64 round-trips, and
           # pgx converts them through their decimal text.
           - db_type: pg_catalog.numeric
@@ -52,3 +61,17 @@ sql:
       go:
         <<: *go
         out: internal/incident/queries
+  - engine: postgresql
+    schema: migrations
+    queries: internal/warning/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/warning/queries
+  - engine: postgresql
+    schema: migrations
+    queries: internal/exposure/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/exposure/queries
