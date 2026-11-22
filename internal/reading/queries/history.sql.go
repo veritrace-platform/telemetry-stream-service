@@ -10,6 +10,51 @@ import (
 	"time"
 )
 
+const inBoundsBefore = `-- name: InBoundsBefore :many
+SELECT temperature_celsius
+FROM telemetry.sensor_readings
+WHERE sscc = $1
+  AND recorded_at < $2
+  AND temperature_celsius BETWEEN $3 AND $4
+ORDER BY recorded_at DESC, device_id DESC
+LIMIT $5
+`
+
+type InBoundsBeforeParams struct {
+	Sscc       string
+	Before     time.Time
+	MinCelsius float64
+	MaxCelsius float64
+	RowLimit   int32
+}
+
+// The temperatures of the last readings of an SSCC recorded before a time within bounds, newest first.
+func (q *Queries) InBoundsBefore(ctx context.Context, arg InBoundsBeforeParams) ([]float64, error) {
+	rows, err := q.db.Query(ctx, inBoundsBefore,
+		arg.Sscc,
+		arg.Before,
+		arg.MinCelsius,
+		arg.MaxCelsius,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []float64
+	for rows.Next() {
+		var temperature_celsius float64
+		if err := rows.Scan(&temperature_celsius); err != nil {
+			return nil, err
+		}
+		items = append(items, temperature_celsius)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const latestReadingBefore = `-- name: LatestReadingBefore :one
 SELECT recorded_at
 FROM telemetry.sensor_readings

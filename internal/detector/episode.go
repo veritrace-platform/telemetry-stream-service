@@ -108,6 +108,11 @@ func (e *Episode) Seed(lastBefore time.Time, latest *incident.Incident) {
 	}
 }
 
+// Breached reports whether the episode is a confirmed breach that lasts.
+func (e *Episode) Breached() bool {
+	return e.phase == breached
+}
+
 // Step evaluates a reading and returns the changes it makes, in order. A reading whose time is not after the last
 // evaluated one is not evaluated, and Step reports false.
 func (e *Episode) Step(r reading.Reading) ([]Change, bool) {

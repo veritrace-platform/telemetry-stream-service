@@ -1,0 +1,410 @@
+{
+  "description": "Thermal exposure and shelf life (docs/domain/cold-chain-monitoring.md section 8, ADR-0024). exposure: readings of one SSCC, merged in device-time order (ties by device ID); each stands for the time until the next reading, at most 15 s, and the last for none; temperatures in °C, MKT with dH/R = 10000 K and T in kelvin (T °C + 273.15); extra aging is the sum of dt * (Q10^((T - max) / 10) - 1) over readings above max. shelf_life: the label shelf life runs from the start of the production date to the end of the expiration date, both in UTC; the estimated expiry is the label expiry minus the extra aging, and the estimated expiration date the day of the last moment before it. Compare numbers with a tolerance of 1e-6.",
+  "exposure": [
+    {
+      "note": "A chilled load held at 4.3-4.7 °C for one minute by one device: nothing out of bounds",
+      "min_temp_celsius": 2,
+      "max_temp_celsius": 8,
+      "shelf_life_q10": 3.0,
+      "readings": [
+        {
+          "recorded_at": "2026-09-01T14:00:00.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:05.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.6
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:10.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.4
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:15.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:20.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.7
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:25.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:30.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.3
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:35.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:40.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.6
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:45.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.4
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:50.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:55.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:01:00.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.6
+        }
+      ],
+      "expected": {
+        "reading_count": 13,
+        "covered_seconds": 60.0,
+        "uncovered_seconds": 0.0,
+        "mean_temperature_celsius": 4.5,
+        "mean_kinetic_temperature_celsius": 4.500612575953994,
+        "lowest_temperature_celsius": 4.3,
+        "highest_temperature_celsius": 4.7,
+        "time_above_max_seconds": 0.0,
+        "time_below_min_seconds": 0.0,
+        "degree_minutes_above_max": 0.0,
+        "degree_minutes_below_min": 0.0,
+        "extra_aging_seconds": 0.0
+      }
+    },
+    {
+      "note": "Two devices 2.5 s apart during a warm-up above 8 °C: merged in device-time order",
+      "min_temp_celsius": 2,
+      "max_temp_celsius": 8,
+      "shelf_life_q10": 3.0,
+      "readings": [
+        {
+          "recorded_at": "2026-09-01T14:00:00.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 6.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:05.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 7.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:10.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 9.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:15.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 10.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:20.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 12.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:25.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 11.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:30.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 9.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:35.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 8.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:40.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 7.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:02.500Z",
+          "device_id": "REEFER-0002",
+          "temperature_celsius": 6.2
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:07.500Z",
+          "device_id": "REEFER-0002",
+          "temperature_celsius": 7.8
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:12.500Z",
+          "device_id": "REEFER-0002",
+          "temperature_celsius": 9.4
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:17.500Z",
+          "device_id": "REEFER-0002",
+          "temperature_celsius": 10.9
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:22.500Z",
+          "device_id": "REEFER-0002",
+          "temperature_celsius": 12.4
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:27.500Z",
+          "device_id": "REEFER-0002",
+          "temperature_celsius": 10.6
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:32.500Z",
+          "device_id": "REEFER-0002",
+          "temperature_celsius": 9.1
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:37.500Z",
+          "device_id": "REEFER-0002",
+          "temperature_celsius": 7.9
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:42.500Z",
+          "device_id": "REEFER-0002",
+          "temperature_celsius": 6.8
+        }
+      ],
+      "expected": {
+        "reading_count": 18,
+        "covered_seconds": 42.5,
+        "uncovered_seconds": 0.0,
+        "mean_temperature_celsius": 9.105882352941176,
+        "mean_kinetic_temperature_celsius": 9.31421482205883,
+        "lowest_temperature_celsius": 6.0,
+        "highest_temperature_celsius": 12.4,
+        "time_above_max_seconds": 25.0,
+        "time_below_min_seconds": 0.0,
+        "degree_minutes_above_max": 1.0166666666666666,
+        "degree_minutes_below_min": 0.0,
+        "extra_aging_seconds": 7.939169484519374
+      }
+    },
+    {
+      "note": "A 40 s gap between readings: the reading before it stands for 15 s, and 25 s are uncovered",
+      "min_temp_celsius": 2,
+      "max_temp_celsius": 8,
+      "shelf_life_q10": 3.0,
+      "readings": [
+        {
+          "recorded_at": "2026-09-01T14:00:00.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:05.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.2
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:10.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 4.1
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:50.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 5.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:55.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 5.2
+        },
+        {
+          "recorded_at": "2026-09-01T14:01:00.000Z",
+          "device_id": "REEFER-0001",
+          "temperature_celsius": 5.1
+        }
+      ],
+      "expected": {
+        "reading_count": 6,
+        "covered_seconds": 35.0,
+        "uncovered_seconds": 25.0,
+        "mean_temperature_celsius": 4.385714285714286,
+        "mean_kinetic_temperature_celsius": 4.39878667989035,
+        "lowest_temperature_celsius": 4.0,
+        "highest_temperature_celsius": 5.2,
+        "time_above_max_seconds": 0.0,
+        "time_below_min_seconds": 0.0,
+        "degree_minutes_above_max": 0.0,
+        "degree_minutes_below_min": 0.0,
+        "extra_aging_seconds": 0.0
+      }
+    },
+    {
+      "note": "Frozen goods (-25 to -18 °C, Q10 2) colder and then warmer than their bounds",
+      "min_temp_celsius": -25,
+      "max_temp_celsius": -18,
+      "shelf_life_q10": 2.0,
+      "readings": [
+        {
+          "recorded_at": "2026-09-01T14:00:00.000Z",
+          "device_id": "FREEZER-01",
+          "temperature_celsius": -20.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:05.000Z",
+          "device_id": "FREEZER-01",
+          "temperature_celsius": -24.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:10.000Z",
+          "device_id": "FREEZER-01",
+          "temperature_celsius": -26.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:15.000Z",
+          "device_id": "FREEZER-01",
+          "temperature_celsius": -27.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:20.000Z",
+          "device_id": "FREEZER-01",
+          "temperature_celsius": -26.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:25.000Z",
+          "device_id": "FREEZER-01",
+          "temperature_celsius": -25.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:30.000Z",
+          "device_id": "FREEZER-01",
+          "temperature_celsius": -22.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:35.000Z",
+          "device_id": "FREEZER-01",
+          "temperature_celsius": -17.0
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:40.000Z",
+          "device_id": "FREEZER-01",
+          "temperature_celsius": -16.5
+        },
+        {
+          "recorded_at": "2026-09-01T14:00:45.000Z",
+          "device_id": "FREEZER-01",
+          "temperature_celsius": -19.0
+        }
+      ],
+      "expected": {
+        "reading_count": 10,
+        "covered_seconds": 45.0,
+        "uncovered_seconds": 0.0,
+        "mean_temperature_celsius": -22.77777777777778,
+        "mean_kinetic_temperature_celsius": -21.592857458997287,
+        "lowest_temperature_celsius": -27.5,
+        "highest_temperature_celsius": -16.5,
+        "time_above_max_seconds": 10.0,
+        "time_below_min_seconds": 15.0,
+        "degree_minutes_above_max": 0.20833333333333334,
+        "degree_minutes_below_min": 0.4166666666666667,
+        "extra_aging_seconds": 0.906714673020691
+      }
+    }
+  ],
+  "shelf_life": [
+    {
+      "note": "Fresh milk (2-8 °C, Q10 3, 14 days) after three hours at 22 °C: REDUCED, expiring 13:00 UTC on the label date",
+      "shelf_life_q10": 3.0,
+      "extra_aging_seconds": 39479.796594857646,
+      "production_date": "2026-09-01",
+      "expiration_date": "2026-09-14",
+      "assessed_at": "2026-09-01T17:30:00.000Z",
+      "expected": {
+        "estimated_expiry": "2026-09-14T13:02:00.203Z",
+        "estimated_expiration_date": "2026-09-14",
+        "shelf_life_loss_hours": 10.966610165238235,
+        "shelf_life_loss_percent": 3.2638720729875703,
+        "remaining_shelf_life_hours": 307.53338983472224,
+        "status": "REDUCED"
+      }
+    },
+    {
+      "note": "One hour of extra aging over 14 days is 0.3 %: INTACT",
+      "shelf_life_q10": 3.0,
+      "extra_aging_seconds": 3600.0,
+      "production_date": "2026-09-01",
+      "expiration_date": "2026-09-14",
+      "assessed_at": "2026-09-02T08:00:00.000Z",
+      "expected": {
+        "estimated_expiry": "2026-09-14T23:00:00.000Z",
+        "estimated_expiration_date": "2026-09-14",
+        "shelf_life_loss_hours": 1.0,
+        "shelf_life_loss_percent": 0.2976190476190476,
+        "remaining_shelf_life_hours": 303.0,
+        "status": "INTACT"
+      }
+    },
+    {
+      "note": "Exactly one day of extra aging: the estimated expiry is midnight, so the last good day is the day before",
+      "shelf_life_q10": 3.0,
+      "extra_aging_seconds": 86400.0,
+      "production_date": "2026-09-01",
+      "expiration_date": "2026-09-07",
+      "assessed_at": "2026-09-03T00:00:00.000Z",
+      "expected": {
+        "estimated_expiry": "2026-09-07T00:00:00.000Z",
+        "estimated_expiration_date": "2026-09-06",
+        "shelf_life_loss_hours": 24.0,
+        "shelf_life_loss_percent": 14.285714285714286,
+        "remaining_shelf_life_hours": 96.0,
+        "status": "REDUCED"
+      }
+    },
+    {
+      "note": "Assessed after the estimated expiry: EXPIRED, with a negative remaining shelf life",
+      "shelf_life_q10": 3.0,
+      "extra_aging_seconds": 7200.0,
+      "production_date": "2026-09-01",
+      "expiration_date": "2026-09-03",
+      "assessed_at": "2026-09-03T23:00:00.000Z",
+      "expected": {
+        "estimated_expiry": "2026-09-03T22:00:00.000Z",
+        "estimated_expiration_date": "2026-09-03",
+        "shelf_life_loss_hours": 2.0,
+        "shelf_life_loss_percent": 2.7777777777777777,
+        "remaining_shelf_life_hours": -1.0,
+        "status": "EXPIRED"
+      }
+    },
+    {
+      "note": "No extra aging, assessed before the end of the label date: INTACT",
+      "shelf_life_q10": 3.0,
+      "extra_aging_seconds": 0.0,
+      "production_date": "2026-09-01",
+      "expiration_date": "2026-09-01",
+      "assessed_at": "2026-09-01T12:00:00.000Z",
+      "expected": {
+        "estimated_expiry": "2026-09-02T00:00:00.000Z",
+        "estimated_expiration_date": "2026-09-01",
+        "shelf_life_loss_hours": 0.0,
+        "shelf_life_loss_percent": 0.0,
+        "remaining_shelf_life_hours": 12.0,
+        "status": "INTACT"
+      }
+    }
+  ]
+}

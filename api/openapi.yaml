@@ -191,6 +191,210 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/telemetry/shipments/{sscc}/warnings:
+    parameters:
+      - $ref: "#/components/parameters/SSCC"
+    get:
+      operationId: listShipmentWarnings
+      tags: [Telemetry]
+      summary: List a shipment's excursion warnings
+      description: |
+        The excursion warnings of one shipment, newest first (`docs/domain/cold-chain-monitoring.md` §7). Errors as for
+        the readings.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of warnings.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WarningPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/telemetry/shipments/{sscc}/thermal-exposure:
+    parameters:
+      - $ref: "#/components/parameters/SSCC"
+    get:
+      operationId: getThermalExposure
+      tags: [Telemetry]
+      summary: Read a shipment's thermal exposure and shelf-life estimate
+      description: |
+        The thermal exposure of a shipment over its readings until the end of its monitoring, or until now while it
+        is monitored, and the shelf life that it cost the goods (`docs/domain/cold-chain-monitoring.md` §8).
+        `shelf_life` is `null` for a shipment created before shipments carried the lot's production date and Q10.
+        Errors as for the readings.
+      responses:
+        "200":
+          description: The exposure.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThermalExposure"
+              example:
+                sscc: "089300010000000018"
+                assessed_at: "2026-09-01T17:30:00Z"
+                monitoring_ended: true
+                min_temp_celsius: 2
+                max_temp_celsius: 8
+                reading_count: 2520
+                first_reading_at: "2026-09-01T14:00:00Z"
+                last_reading_at: "2026-09-01T17:29:55Z"
+                covered_seconds: 12595
+                uncovered_seconds: 0
+                mean_temperature_celsius: 15.92
+                mean_kinetic_temperature_celsius: 18.47
+                lowest_temperature_celsius: 4.3
+                highest_temperature_celsius: 22.1
+                time_above_max_seconds: 10850
+                time_below_min_seconds: 0
+                degree_minutes_above_max: 2520.4
+                degree_minutes_below_min: 0
+                shelf_life:
+                  shelf_life_q10: 3
+                  production_date: "2026-09-01"
+                  label_expiration_date: "2026-09-14"
+                  estimated_expiration_date: "2026-09-14"
+                  shelf_life_loss_hours: 10.97
+                  shelf_life_loss_percent: 3.26
+                  remaining_shelf_life_hours: 307.53
+                  status: REDUCED
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/telemetry/warnings:
+    get:
+      operationId: listWarnings
+      tags: [Telemetry]
+      summary: List excursion warnings
+      description: |
+        Newest first: the excursion warnings of the shipments that the caller sees as in `listIncidents`.
+        `state=open` keeps the open warnings, `state=closed` those with an outcome.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, closed]
+      responses:
+        "200":
+          description: A page of warnings.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WarningPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/telemetry/warnings/performance:
+    get:
+      operationId: getWarningPerformance
+      tags: [Telemetry]
+      summary: Measure the forecast quality of excursion warnings
+      description: |
+        Over `[from, to)`, for the shipments that the caller sees as in `listIncidents`, or for one of them
+        (`docs/domain/cold-chain-monitoring.md` §7.3): warnings issued in the period by outcome, incidents started in
+        the period and those that a warning preceded, precision, recall, lead times, and the error of the predicted
+        excursion time. `to` defaults to now and `from` to 7 days before it; the window is at most 90 days. An `sscc`
+        that the caller may not see answers as for the readings.
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: sscc
+          in: query
+          schema:
+            type: string
+            pattern: "^[0-9]{18}$"
+      responses:
+        "200":
+          description: The forecast quality.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WarningPerformance"
+              example:
+                from: "2026-08-25T00:00:00Z"
+                to: "2026-09-01T00:00:00Z"
+                sscc: null
+                warnings:
+                  issued: 24
+                  open: 1
+                  breached: 15
+                  cleared: 6
+                  inconclusive: 2
+                incidents:
+                  count: 17
+                  warned: 15
+                precision: 0.7143
+                recall: 0.8824
+                lead_time_seconds:
+                  median: 245
+                  min: 40
+                  mean: 251.3
+                mean_excursion_time_error_seconds: 58.4
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /ws/v1/notifications:
     get:
       operationId: openNotifications
@@ -473,6 +677,284 @@ components:
         last_24h_count:
           type: integer
           description: Incidents confirmed in the last 24 hours, open or resolved.
+    Warning:
+      type: object
+      description: |
+        An excursion warning (`docs/domain/cold-chain-monitoring.md` §7): issued when the temperature trend reaches a
+        bound within 10 minutes, and closed as `BREACHED` (a breach was confirmed while it was open), `CLEARED` (the
+        trend turned), or `INCONCLUSIVE` (the shipment stopped being monitored).
+      required:
+        - id
+        - shipment_id
+        - sscc
+        - device_id
+        - issued_at
+        - bound
+        - bound_celsius
+        - temperature_celsius
+        - slope_celsius_per_minute
+        - predicted_excursion_at
+        - closed_at
+        - outcome
+        - incident_id
+        - lead_time_seconds
+        - product_name
+        - gtin
+        - lot_number
+      properties:
+        id:
+          type: string
+          format: uuid
+        shipment_id:
+          type: string
+          format: uuid
+        sscc:
+          type: string
+        device_id:
+          type: string
+          description: The device whose reading issued the warning.
+        issued_at:
+          type: string
+          format: date-time
+        bound:
+          $ref: "#/components/schemas/WarningBound"
+        bound_celsius:
+          type: number
+          description: The value of the bound.
+        temperature_celsius:
+          type: number
+          description: The temperature of the reading that issued the warning.
+        slope_celsius_per_minute:
+          type: number
+          description: The slope of the trend; positive toward `MAX`, negative toward `MIN`.
+        predicted_excursion_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: [string, "null"]
+          format: date-time
+          description: "`null` while the warning is open."
+        outcome:
+          oneOf:
+            - $ref: "#/components/schemas/WarningOutcome"
+            - type: "null"
+          description: "`null` while the warning is open."
+        incident_id:
+          type: [string, "null"]
+          format: uuid
+          description: The incident of a `BREACHED` warning.
+        lead_time_seconds:
+          type: [integer, "null"]
+          description: For a `BREACHED` warning, the whole seconds from the warning to the start of the breach's episode.
+        product_name:
+          type: string
+        gtin:
+          type: string
+        lot_number:
+          type: string
+    WarningBound:
+      type: string
+      description: "`MAX` for a rising temperature, `MIN` for a falling one."
+      enum: [MAX, MIN]
+    WarningOutcome:
+      type: string
+      enum: [BREACHED, CLEARED, INCONCLUSIVE]
+    WarningPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Warning"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    WarningPerformance:
+      type: object
+      required:
+        - from
+        - to
+        - sscc
+        - warnings
+        - incidents
+        - precision
+        - recall
+        - lead_time_seconds
+        - mean_excursion_time_error_seconds
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        sscc:
+          type: [string, "null"]
+          description: The shipment measured, or `null` for every shipment of the caller.
+        warnings:
+          type: object
+          description: Warnings issued in the period, by outcome; `open` have none yet.
+          required: [issued, open, breached, cleared, inconclusive]
+          properties:
+            issued:
+              type: integer
+            open:
+              type: integer
+            breached:
+              type: integer
+            cleared:
+              type: integer
+            inconclusive:
+              type: integer
+        incidents:
+          type: object
+          description: Incidents that started in the period, and those that a warning was closed as `BREACHED` with.
+          required: [count, warned]
+          properties:
+            count:
+              type: integer
+            warned:
+              type: integer
+        precision:
+          type: [number, "null"]
+          description: "`breached / (breached + cleared)`, four decimals; `null` without either."
+        recall:
+          type: [number, "null"]
+          description: "`incidents.warned / incidents.count`, four decimals; `null` without incidents."
+        lead_time_seconds:
+          description: Lead times of the `BREACHED` warnings; `null` without any.
+          oneOf:
+            - type: object
+              required: [median, min, mean]
+              properties:
+                median:
+                  type: number
+                min:
+                  type: number
+                mean:
+                  type: number
+            - type: "null"
+        mean_excursion_time_error_seconds:
+          type: [number, "null"]
+          description: Mean of `|started_at − predicted_excursion_at|` over the `BREACHED` warnings; `null` without any.
+    ThermalExposure:
+      type: object
+      description: |
+        Readings of all devices merge in device-time order; each stands for the time until the next one, at most
+        15 s, and the rest of a longer gap is uncovered. Temperatures in °C, two decimals.
+      required:
+        - sscc
+        - assessed_at
+        - monitoring_ended
+        - min_temp_celsius
+        - max_temp_celsius
+        - reading_count
+        - first_reading_at
+        - last_reading_at
+        - covered_seconds
+        - uncovered_seconds
+        - mean_temperature_celsius
+        - mean_kinetic_temperature_celsius
+        - lowest_temperature_celsius
+        - highest_temperature_celsius
+        - time_above_max_seconds
+        - time_below_min_seconds
+        - degree_minutes_above_max
+        - degree_minutes_below_min
+        - shelf_life
+      properties:
+        sscc:
+          type: string
+        assessed_at:
+          type: string
+          format: date-time
+          description: The time the exposure runs to.
+        monitoring_ended:
+          type: boolean
+          description: Whether the shipment had stopped being monitored by then.
+        min_temp_celsius:
+          type: number
+        max_temp_celsius:
+          type: number
+        reading_count:
+          type: integer
+        first_reading_at:
+          type: [string, "null"]
+          format: date-time
+        last_reading_at:
+          type: [string, "null"]
+          format: date-time
+        covered_seconds:
+          type: integer
+        uncovered_seconds:
+          type: integer
+        mean_temperature_celsius:
+          type: [number, "null"]
+          description: Time-weighted; `null` without covered time.
+        mean_kinetic_temperature_celsius:
+          type: [number, "null"]
+          description: Mean kinetic temperature (USP <1079>, ΔH = 83.144 kJ/mol); `null` without covered time.
+        lowest_temperature_celsius:
+          type: [number, "null"]
+        highest_temperature_celsius:
+          type: [number, "null"]
+        time_above_max_seconds:
+          type: integer
+        time_below_min_seconds:
+          type: integer
+        degree_minutes_above_max:
+          type: number
+          description: Sum of the time above the maximum times the degrees above it, in °C·min.
+        degree_minutes_below_min:
+          type: number
+        shelf_life:
+          oneOf:
+            - $ref: "#/components/schemas/ShelfLife"
+            - type: "null"
+    ShelfLife:
+      type: object
+      description: |
+        The label shelf life runs from the start of the production date to the end of the expiration date (UTC).
+        Above `max_temp_celsius` the goods age `shelf_life_q10^((T − max) / 10)` times as fast; the extra aging moves
+        the expiry earlier. Hours and percentages have two decimals.
+      required:
+        - shelf_life_q10
+        - production_date
+        - label_expiration_date
+        - estimated_expiration_date
+        - shelf_life_loss_hours
+        - shelf_life_loss_percent
+        - remaining_shelf_life_hours
+        - status
+      properties:
+        shelf_life_q10:
+          type: number
+        production_date:
+          type: string
+          format: date
+        label_expiration_date:
+          type: string
+          format: date
+        estimated_expiration_date:
+          type: string
+          format: date
+          description: The day of the last moment before the estimated expiry.
+        shelf_life_loss_hours:
+          type: number
+          description: The extra aging.
+        shelf_life_loss_percent:
+          type: number
+          description: The extra aging as a percentage of the label shelf life.
+        remaining_shelf_life_hours:
+          type: number
+          description: From the assessment time to the estimated expiry; negative once it has passed.
+        status:
+          $ref: "#/components/schemas/ShelfLifeStatus"
+    ShelfLifeStatus:
+      type: string
+      description: "`EXPIRED` when no shelf life remains, `REDUCED` from a loss of 1 %, otherwise `INTACT`."
+      enum: [INTACT, REDUCED, EXPIRED]
     NotificationMessage:
       description: |
         A server message on the notification WebSocket (`messaging.md` §6.1). Its `type` decides the shape of `data`,
@@ -480,6 +962,9 @@ components:
       oneOf:
         - $ref: "#/components/schemas/BreachConfirmedMessage"
         - $ref: "#/components/schemas/BreachResolvedMessage"
+        - $ref: "#/components/schemas/WarningIssuedMessage"
+        - $ref: "#/components/schemas/WarningClosedMessage"
+        - $ref: "#/components/schemas/ShelfLifeReducedMessage"
         - $ref: "#/components/schemas/RecallMessage"
         - $ref: "#/components/schemas/ReadingMessage"
         - $ref: "#/components/schemas/SubscriptionMessage"
@@ -489,6 +974,9 @@ components:
         mapping:
           cold_chain.breach_confirmed: "#/components/schemas/BreachConfirmedMessage"
           cold_chain.breach_resolved: "#/components/schemas/BreachResolvedMessage"
+          cold_chain.warning_issued: "#/components/schemas/WarningIssuedMessage"
+          cold_chain.warning_closed: "#/components/schemas/WarningClosedMessage"
+          cold_chain.shelf_life_reduced: "#/components/schemas/ShelfLifeReducedMessage"
           shipment.recalled: "#/components/schemas/RecallMessage"
           telemetry.reading: "#/components/schemas/ReadingMessage"
           subscribed: "#/components/schemas/SubscriptionMessage"
@@ -528,6 +1016,39 @@ components:
               enum: [cold_chain.breach_resolved]
             data:
               $ref: "#/components/schemas/NotificationBreachResolved"
+    WarningIssuedMessage:
+      allOf:
+        - $ref: "#/components/schemas/NotificationEnvelope"
+        - type: object
+          required: [type, data]
+          properties:
+            type:
+              type: string
+              enum: [cold_chain.warning_issued]
+            data:
+              $ref: "#/components/schemas/NotificationWarningIssued"
+    WarningClosedMessage:
+      allOf:
+        - $ref: "#/components/schemas/NotificationEnvelope"
+        - type: object
+          required: [type, data]
+          properties:
+            type:
+              type: string
+              enum: [cold_chain.warning_closed]
+            data:
+              $ref: "#/components/schemas/NotificationWarningClosed"
+    ShelfLifeReducedMessage:
+      allOf:
+        - $ref: "#/components/schemas/NotificationEnvelope"
+        - type: object
+          required: [type, data]
+          properties:
+            type:
+              type: string
+              enum: [cold_chain.shelf_life_reduced]
+            data:
+              $ref: "#/components/schemas/NotificationShelfLifeReduced"
     RecallMessage:
       allOf:
         - $ref: "#/components/schemas/NotificationEnvelope"
@@ -639,6 +1160,111 @@ components:
         duration_seconds:
           type: integer
         extreme_temperature_celsius:
+          type: number
+    NotificationWarningIssued:
+      type: object
+      description: "`cold_chain.warning_issued`: the event data of `messaging.md` §7 with the shipment's product."
+      required:
+        - warning_id
+        - shipment_id
+        - sscc
+        - device_id
+        - issued_at
+        - bound
+        - bound_celsius
+        - temperature_celsius
+        - slope_celsius_per_minute
+        - predicted_excursion_at
+        - product_name
+        - gtin
+      properties:
+        warning_id:
+          type: string
+          format: uuid
+        shipment_id:
+          type: string
+          format: uuid
+        sscc:
+          type: string
+        device_id:
+          type: string
+        issued_at:
+          type: string
+          format: date-time
+        bound:
+          $ref: "#/components/schemas/WarningBound"
+        bound_celsius:
+          type: number
+        temperature_celsius:
+          type: number
+        slope_celsius_per_minute:
+          type: number
+        predicted_excursion_at:
+          type: string
+          format: date-time
+        product_name:
+          type: string
+        gtin:
+          type: string
+    NotificationWarningClosed:
+      type: object
+      description: "`cold_chain.warning_closed`: the event data of `messaging.md` §7."
+      required: [warning_id, sscc, closed_at, outcome, incident_id, lead_time_seconds]
+      properties:
+        warning_id:
+          type: string
+          format: uuid
+        sscc:
+          type: string
+        closed_at:
+          type: string
+          format: date-time
+        outcome:
+          $ref: "#/components/schemas/WarningOutcome"
+        incident_id:
+          type: [string, "null"]
+          format: uuid
+        lead_time_seconds:
+          type: [integer, "null"]
+    NotificationShelfLifeReduced:
+      type: object
+      description: "`cold_chain.shelf_life_reduced`: the event data of `messaging.md` §7."
+      required:
+        - shipment_id
+        - sscc
+        - status
+        - assessed_at
+        - shelf_life_q10
+        - label_expiration_date
+        - estimated_expiration_date
+        - shelf_life_loss_hours
+        - shelf_life_loss_percent
+        - remaining_shelf_life_hours
+      properties:
+        shipment_id:
+          type: string
+          format: uuid
+        sscc:
+          type: string
+        status:
+          type: string
+          enum: [REDUCED, EXPIRED]
+        assessed_at:
+          type: string
+          format: date-time
+        shelf_life_q10:
+          type: number
+        label_expiration_date:
+          type: string
+          format: date
+        estimated_expiration_date:
+          type: string
+          format: date
+        shelf_life_loss_hours:
+          type: number
+        shelf_life_loss_percent:
+          type: number
+        remaining_shelf_life_hours:
           type: number
     NotificationRecall:
       type: object

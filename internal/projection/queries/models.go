@@ -24,4 +24,9 @@ type TelemetryShipmentProjection struct {
 	MaxTempCelsius       float64
 	LastEventSequence    int32
 	UpdatedAt            time.Time
+	ProductionDate       *time.Time
+	ExpirationDate       *time.Time
+	ShelfLifeQ10         *float64
+	MonitoringEndedAt    *time.Time
+	ShelfLifeStatus      string
 }

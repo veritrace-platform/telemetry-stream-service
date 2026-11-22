@@ -17,6 +17,7 @@ import (
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/dbtest"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/detector"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/envelope"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/incident"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/reading"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/stream"
@@ -52,7 +53,7 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	db := dbtest.Start(t)
-	brokers := kafkatest.Start(t, 6, incident.Topic)
+	brokers := kafkatest.Start(t, 6, incident.Topic, envelope.TopicForecasts)
 	client, err := stream.NewProducer(brokers)
 	if err != nil {
 		t.Fatalf("NewProducer() error = %v", err)

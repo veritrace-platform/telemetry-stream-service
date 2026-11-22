@@ -49,7 +49,11 @@ func Forbidden(w http.ResponseWriter, r *http.Request, detail string) {
 
 // SSCC reads the {sscc} path parameter. A malformed SSCC answers 422 INVALID_GS1_IDENTIFIER, and ok is false.
 func SSCC(w http.ResponseWriter, r *http.Request) (sscc string, ok bool) {
-	sscc = chi.URLParam(r, "sscc")
+	return CheckSSCC(w, r, chi.URLParam(r, "sscc"))
+}
+
+// CheckSSCC checks an SSCC from the request. A malformed SSCC answers 422 INVALID_GS1_IDENTIFIER, and ok is false.
+func CheckSSCC(w http.ResponseWriter, r *http.Request, sscc string) (string, bool) {
 	reason := gs1.CheckSSCC(sscc)
 	if reason == "" {
 		return sscc, true
@@ -91,6 +95,11 @@ func (q *Query) Time(name string, def time.Time) time.Time {
 		return def
 	}
 	return t.UTC()
+}
+
+// String reads a parameter, or returns "" when it is absent.
+func (q *Query) String(name string) string {
+	return q.get(name)
 }
 
 // Enum reads one of the allowed values, or returns def when the parameter is absent.

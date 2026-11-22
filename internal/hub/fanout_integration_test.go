@@ -15,17 +15,21 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/veritrace-platform/telemetry-stream-service/internal/auth"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/envelope"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/exposure"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/forecast"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/hub"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/incident"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/projection"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/reading"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/stream"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/stream/kafkatest"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/warning"
 )
 
 func TestFanout(t *testing.T) {
 	f := newFixture(t, 0)
-	brokers := kafkatest.Start(t, 6, incident.Topic, projection.Topic, reading.RawTopic)
+	brokers := kafkatest.Start(t, 6, incident.Topic, envelope.TopicForecasts, projection.Topic, reading.RawTopic)
 	producer, err := stream.NewProducer(brokers)
 	if err != nil {
 		t.Fatal(err)
@@ -124,6 +128,55 @@ func TestFanout(t *testing.T) {
 		if m.ID != e.EventID || data["incident_hash"] != i.IncidentHash || data["product_name"] != "Fresh milk 1 L" ||
 			data["gtin"] != "08930001000018" || data["temperature_celsius"] != 9.4 {
 			t.Errorf("message %s: %v", m.ID, data)
+		}
+	})
+
+	t.Run("a warning, with the product, and its closure", func(t *testing.T) {
+		issuedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Millisecond)
+		w := warning.Warning{
+			ID: warning.NewID(sscc, issuedAt), ShipmentID: f.shipment.ShipmentID, SSCC: sscc, DeviceID: "REEFER-0001",
+			IssuedAt: issuedAt, Bound: forecast.Max, BoundCelsius: 8, TemperatureCelsius: 6.4, SlopeCelsiusPerMinute: 0.62,
+			PredictedExcursionAt: issuedAt.Add(4 * time.Minute),
+		}
+		issued, _ := warning.IssuedEvent(w, projection.StatusInTransit)
+		m := produceUntil(t, func() *kgo.Record {
+			r, _ := warning.Record(issued, "")
+			return r
+		}, warning.TypeIssued)
+		var data map[string]any
+		_ = json.Unmarshal(m.Data, &data)
+		if m.ID != issued.EventID || data["warning_id"] != w.ID.String() || data["product_name"] != "Fresh milk 1 L" ||
+			data["gtin"] != "08930001000018" || data["bound"] != "MAX" || data["slope_celsius_per_minute"] != 0.62 {
+			t.Errorf("message %s: %v", m.ID, data)
+		}
+
+		closedAt, outcome := issuedAt.Add(3*time.Minute), warning.Cleared
+		w.ClosedAt, w.Outcome = &closedAt, &outcome
+		closed, _ := warning.ClosedEvent(w, projection.StatusInTransit)
+		m = produceUntil(t, func() *kgo.Record {
+			r, _ := warning.Record(closed, "")
+			return r
+		}, warning.TypeClosed)
+		data = nil
+		_ = json.Unmarshal(m.Data, &data)
+		if data["outcome"] != "CLEARED" || data["incident_id"] != nil || data["product_name"] != nil || len(data) != 6 {
+			t.Errorf("closure = %v", data)
+		}
+	})
+
+	t.Run("a shelf-life alert", func(t *testing.T) {
+		assessed := time.Now().UTC().Truncate(time.Millisecond)
+		day := assessed.Truncate(24 * time.Hour)
+		sl := exposure.Assess(11*time.Hour, day.AddDate(0, 0, -1), day.AddDate(0, 0, 12), 3, assessed)
+		alert, _ := exposure.AlertEvent(f.shipment.Exposure(), sl, assessed)
+		m := produceUntil(t, func() *kgo.Record {
+			r, _ := alert.Record(envelope.TopicForecasts, "")
+			return r
+		}, exposure.TypeShelfLifeReduced)
+		var data map[string]any
+		_ = json.Unmarshal(m.Data, &data)
+		if m.ID != alert.EventID || data["status"] != "REDUCED" || data["shelf_life_loss_hours"] != 11.0 {
+			t.Errorf("alert %s: %v", m.ID, data)
 		}
 	})
 

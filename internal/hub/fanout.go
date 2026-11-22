@@ -13,16 +13,19 @@ import (
 	"github.com/google/uuid"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/veritrace-platform/telemetry-stream-service/internal/envelope"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/exposure"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/incident"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/projection"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/reading"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/warning"
 )
 
 // groupPrefix starts the consumer group ID of each instance's fan-out.
 const groupPrefix = "telemetry-stream-service.hub."
 
-// Fanout feeds the hub of this instance from Kafka (ADR-0012): cold-chain incidents, recalls from shipment.events,
-// and readings for live subscriptions. Each instance consumes in a consumer group of its own, from the end of each
+// Fanout feeds the hub of this instance from Kafka (ADR-0012): cold-chain incidents, excursion warnings and
+// shelf-life alerts from telemetry.forecasts, recalls from shipment.events, and readings for live subscriptions. Each instance consumes in a consumer group of its own, from the end of each
 // partition and without committing offsets, so every instance sees every message and delivers it to its own
 // connections. Kafka removes the group after the instance leaves.
 type Fanout struct {
@@ -40,7 +43,7 @@ func NewFanout(brokers []string, hub *Hub, logger *slog.Logger) (*Fanout, error)
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(brokers...),
 		kgo.ConsumerGroup(groupPrefix+hex.EncodeToString(suffix)),
-		kgo.ConsumeTopics(incident.Topic, projection.Topic, reading.RawTopic),
+		kgo.ConsumeTopics(incident.Topic, envelope.TopicForecasts, projection.Topic, reading.RawTopic),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()),
 		kgo.DisableAutoCommit(),
 		kgo.FetchMaxWait(200*time.Millisecond),
@@ -85,6 +88,8 @@ func (f *Fanout) dispatch(ctx context.Context, r *kgo.Record) error {
 	switch r.Topic {
 	case incident.Topic:
 		return f.incident(ctx, r.Value)
+	case envelope.TopicForecasts:
+		return f.forecast(ctx, r.Value)
 	case projection.Topic:
 		return f.recall(ctx, r.Value)
 	case reading.RawTopic:
@@ -113,6 +118,36 @@ func (f *Fanout) incident(ctx context.Context, value []byte) error {
 		return fmt.Errorf("decode %s data: %w", e.EventType, err)
 	}
 	if e.EventType == incident.TypeBreachConfirmed {
+		data["product_name"], data["gtin"] = s.ProductName, s.GTIN
+	}
+	f.hub.Deliver(s, e.EventType, e.EventID, data)
+	return nil
+}
+
+// forecastTypes are the event types of telemetry.forecasts that the hub delivers (messaging.md §6.1).
+var forecastTypes = map[string]bool{
+	warning.TypeIssued: true, warning.TypeClosed: true, exposure.TypeShelfLifeReduced: true,
+}
+
+// forecast delivers cold_chain.warning_issued, with the product of the shipment, cold_chain.warning_closed, and
+// cold_chain.shelf_life_reduced (messaging.md §6.1).
+func (f *Fanout) forecast(ctx context.Context, value []byte) error {
+	e, err := envelope.Decode(value)
+	if err != nil {
+		return err
+	}
+	if !forecastTypes[e.EventType] {
+		return fmt.Errorf("unknown forecast event type %q", e.EventType)
+	}
+	s, err := f.shipment(ctx, e.Subject.SSCC)
+	if err != nil {
+		return err
+	}
+	var data map[string]any
+	if err := json.Unmarshal(e.Data, &data); err != nil {
+		return fmt.Errorf("decode %s data: %w", e.EventType, err)
+	}
+	if e.EventType == warning.TypeIssued {
 		data["product_name"], data["gtin"] = s.ProductName, s.GTIN
 	}
 	f.hub.Deliver(s, e.EventType, e.EventID, data)
