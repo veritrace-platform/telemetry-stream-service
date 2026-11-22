@@ -14,3 +14,13 @@ WHERE sscc = @sscc
   AND recorded_at < @before
 ORDER BY recorded_at DESC
 LIMIT 1;
+
+-- name: InBoundsBefore :many
+-- The temperatures of the last readings of an SSCC recorded before a time within bounds, newest first.
+SELECT temperature_celsius
+FROM telemetry.sensor_readings
+WHERE sscc = @sscc
+  AND recorded_at < @before
+  AND temperature_celsius BETWEEN @min_celsius AND @max_celsius
+ORDER BY recorded_at DESC, device_id DESC
+LIMIT @row_limit;

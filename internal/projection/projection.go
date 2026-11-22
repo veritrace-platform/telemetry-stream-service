@@ -18,12 +18,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/veritrace-platform/telemetry-stream-service/internal/envelope"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/exposure"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/incident"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/pgerror"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/logging"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/platform/tracecontext"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/projection/queries"
 	"github.com/veritrace-platform/telemetry-stream-service/internal/stream"
+	"github.com/veritrace-platform/telemetry-stream-service/internal/warning"
 )
 
 // Topic is the Kafka topic of shipment events.
@@ -58,8 +61,17 @@ type Shipment struct {
 	LotNumber            string
 	MinTempCelsius       float64
 	MaxTempCelsius       float64
-	LastEventSequence    int
-	UpdatedAt            time.Time
+	// ProductionDate, ExpirationDate, and ShelfLifeQ10 are the lot's, as shipment.created carried them; nil when an
+	// older event lacked them.
+	ProductionDate *time.Time
+	ExpirationDate *time.Time
+	ShelfLifeQ10   *float64
+	// MonitoringEndedAt is when the shipment stopped being monitored; nil while it is.
+	MonitoringEndedAt *time.Time
+	// ShelfLifeStatus is the worst shelf-life status notified so far.
+	ShelfLifeStatus   string
+	LastEventSequence int
+	UpdatedAt         time.Time
 }
 
 // Monitored reports whether the shipment's readings are evaluated against its bounds
@@ -102,7 +114,18 @@ func fromRow(row queries.TelemetryShipmentProjection) Shipment {
 		SSCC: row.Sscc, ShipmentID: row.ShipmentID, OwnerTenantID: row.OwnerTenantID,
 		ParticipantTenantIDs: row.ParticipantTenantIds, AssignedDriverID: row.AssignedDriverID, Status: row.Status,
 		GTIN: row.Gtin, ProductName: row.ProductName, LotNumber: row.LotNumber, MinTempCelsius: row.MinTempCelsius,
-		MaxTempCelsius: row.MaxTempCelsius, LastEventSequence: int(row.LastEventSequence), UpdatedAt: row.UpdatedAt,
+		MaxTempCelsius: row.MaxTempCelsius, ProductionDate: row.ProductionDate, ExpirationDate: row.ExpirationDate,
+		ShelfLifeQ10: row.ShelfLifeQ10, MonitoringEndedAt: row.MonitoringEndedAt, ShelfLifeStatus: row.ShelfLifeStatus,
+		LastEventSequence: int(row.LastEventSequence), UpdatedAt: row.UpdatedAt,
+	}
+}
+
+// Exposure returns what the thermal exposure of the shipment needs.
+func (s Shipment) Exposure() exposure.Shipment {
+	return exposure.Shipment{
+		SSCC: s.SSCC, ShipmentID: s.ShipmentID, Status: s.Status, MinTempCelsius: s.MinTempCelsius,
+		MaxTempCelsius: s.MaxTempCelsius, ProductionDate: s.ProductionDate, ExpirationDate: s.ExpirationDate,
+		ShelfLifeQ10: s.ShelfLifeQ10, MonitoringEndedAt: s.MonitoringEndedAt,
 	}
 }
 
@@ -146,8 +169,10 @@ func NewProjector(pool *pgxpool.Pool, producer Producer, logger *slog.Logger) *P
 // it; any other error fails the batch, which the consumer retries.
 //
 // A shipment that is delivered, cancelled, or recalled is no longer monitored, so readings can no longer resolve
-// an incident that is still open: it is resolved at the last reading recorded until the event occurred. Its
-// cold_chain.breach_resolved event is produced before the transaction commits, as the detector does.
+// an incident or close a warning that is still open: the incident is resolved, and the warning closed as
+// INCONCLUSIVE, at the last reading recorded until the event occurred, and a resolved incident has its shelf-life
+// cost assessed (cold-chain-monitoring.md §7.2, §8.3). Their events are produced before the transaction commits, as
+// the detector does.
 func (p *Projector) Handle(ctx context.Context, records []*kgo.Record) error {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -192,9 +217,9 @@ func (p *Projector) applyRecord(ctx context.Context, tx pgx.Tx, rec *kgo.Record,
 		return fmt.Errorf("savepoint: %w", err)
 	}
 	result, err := e.apply(ctx, queries.New(sp))
-	var resolved *kgo.Record
+	var ended []*kgo.Record
 	if err == nil && result == applied && !statusMonitored(e.Subject.Status) {
-		resolved, err = p.resolveOpenIncident(ctx, sp, e, stream.Header(rec, stream.HeaderTraceparent))
+		ended, err = p.endMonitoring(ctx, sp, e, stream.Header(rec, stream.HeaderTraceparent))
 	}
 	if pgerror.IsDataError(err) {
 		_ = sp.Rollback(ctx)
@@ -208,9 +233,7 @@ func (p *Projector) applyRecord(ctx context.Context, tx pgx.Tx, rec *kgo.Record,
 	if err := sp.Commit(ctx); err != nil {
 		return fmt.Errorf("release savepoint: %w", err)
 	}
-	if resolved != nil {
-		*events = append(*events, resolved)
-	}
+	*events = append(*events, ended...)
 	switch result {
 	case applied:
 	case duplicate:
@@ -224,22 +247,70 @@ func (p *Projector) applyRecord(ctx context.Context, tx pgx.Tx, rec *kgo.Record,
 	return nil
 }
 
-// resolveOpenIncident resolves the shipment's open incident, if any, at its last reading recorded until the event
-// occurred, and returns the record of its cold_chain.breach_resolved event.
-func (p *Projector) resolveOpenIncident(ctx context.Context, db pgx.Tx, e event, traceparent string) (*kgo.Record, error) {
-	closed, ok, err := incident.NewStore(db).ResolveAtShipmentEnd(ctx, e.Subject.SSCC, e.occurredAt)
-	if err != nil || !ok {
-		return nil, err
-	}
-	resolved, err := incident.ResolvedEvent(closed, e.Subject.Status)
-	if err != nil {
-		return nil, err
-	}
-	p.logger.InfoContext(ctx, "breach resolved at shipment end", slog.String("incident_id", closed.ID.String()),
-		slog.String("status", e.Subject.Status))
+// endMonitoring ends what readings can no longer end once a shipment stops being monitored: it resolves the open
+// incident and closes the open warning, if any, at the last reading recorded until the event occurred, and assesses
+// the shelf life that a resolved incident cost. It returns the records of their events.
+func (p *Projector) endMonitoring(ctx context.Context, db pgx.Tx, e event, traceparent string) ([]*kgo.Record, error) {
 	tc, ok := tracecontext.Parse(traceparent)
 	if !ok {
 		tc = tracecontext.New()
 	}
-	return resolved.Record(tc.Child().Traceparent())
+	var records []*kgo.Record
+	add := func(ev envelope.Event, topic string) error {
+		record, err := ev.Record(topic, tc.Child().Traceparent())
+		if err == nil {
+			records = append(records, record)
+		}
+		return err
+	}
+
+	closed, resolved, err := incident.NewStore(db).ResolveAtShipmentEnd(ctx, e.Subject.SSCC, e.occurredAt)
+	if err != nil {
+		return nil, err
+	}
+	if resolved {
+		event, err := incident.ResolvedEvent(closed, e.Subject.Status)
+		if err != nil {
+			return nil, err
+		}
+		if err := add(event.Event, incident.Topic); err != nil {
+			return nil, err
+		}
+		p.logger.InfoContext(ctx, "breach resolved at shipment end", slog.String("incident_id", closed.ID.String()),
+			slog.String("status", e.Subject.Status))
+	}
+
+	w, inconclusive, err := warning.NewStore(db).CloseAtShipmentEnd(ctx, e.Subject.SSCC, e.occurredAt)
+	if err != nil {
+		return nil, err
+	}
+	if inconclusive {
+		event, err := warning.ClosedEvent(w, e.Subject.Status)
+		if err != nil {
+			return nil, err
+		}
+		if err := add(event, envelope.TopicForecasts); err != nil {
+			return nil, err
+		}
+		p.logger.InfoContext(ctx, "excursion warning inconclusive at shipment end", slog.String("warning_id", w.ID.String()),
+			slog.String("status", e.Subject.Status))
+	}
+
+	if resolved {
+		row, err := queries.New(db).GetShipment(ctx, e.Subject.SSCC)
+		if err != nil {
+			return nil, fmt.Errorf("read shipment: %w", err)
+		}
+		alert, err := exposure.Reassess(ctx, db, fromRow(row).Exposure(), *closed.EndedAt)
+		if err != nil {
+			return nil, err
+		}
+		if alert != nil {
+			if err := add(*alert, envelope.TopicForecasts); err != nil {
+				return nil, err
+			}
+			p.logger.InfoContext(ctx, "shelf life reduced", slog.String("data", string(alert.Data)))
+		}
+	}
+	return records, nil
 }

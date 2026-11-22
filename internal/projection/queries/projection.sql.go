@@ -7,6 +7,7 @@ package queries
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -14,23 +15,28 @@ import (
 const advance = `-- name: Advance :execrows
 UPDATE telemetry.shipment_projection
 SET status = $1,
-    last_event_sequence = $2,
+    monitoring_ended_at = CASE
+        WHEN monitoring_ended_at IS NULL AND $1 NOT IN ('CREATED', 'IN_TRANSIT') THEN $2::timestamptz
+        ELSE monitoring_ended_at
+    END,
+    last_event_sequence = $3,
     participant_tenant_ids = CASE
-        WHEN $3::uuid IS NULL
-            OR $3::uuid = ANY (participant_tenant_ids) THEN participant_tenant_ids
-        ELSE array_append(participant_tenant_ids, $3::uuid)
+        WHEN $4::uuid IS NULL
+            OR $4::uuid = ANY (participant_tenant_ids) THEN participant_tenant_ids
+        ELSE array_append(participant_tenant_ids, $4::uuid)
     END,
     assigned_driver_id = CASE
-        WHEN $4::boolean THEN $5::uuid
+        WHEN $5::boolean THEN $6::uuid
         ELSE assigned_driver_id
     END,
     updated_at = now()
-WHERE sscc = $6
-  AND last_event_sequence < $2
+WHERE sscc = $7
+  AND last_event_sequence < $3
 `
 
 type AdvanceParams struct {
 	Status           string
+	OccurredAt       time.Time
 	Sequence         int32
 	JoinedTenantID   *uuid.UUID
 	ChangeDriver     bool
@@ -39,10 +45,12 @@ type AdvanceParams struct {
 }
 
 // Applies an event that follows the last applied one: the new status, a tenant that joined, and a driver
-// assignment that started or ended. Events at or below the last applied sequence change nothing.
+// assignment that started or ended. The first event that takes the shipment out of CREATED and IN_TRANSIT ends its
+// monitoring. Events at or below the last applied sequence change nothing.
 func (q *Queries) Advance(ctx context.Context, arg AdvanceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, advance,
 		arg.Status,
+		arg.OccurredAt,
 		arg.Sequence,
 		arg.JoinedTenantID,
 		arg.ChangeDriver,
@@ -58,10 +66,12 @@ func (q *Queries) Advance(ctx context.Context, arg AdvanceParams) (int64, error)
 const createShipment = `-- name: CreateShipment :execrows
 INSERT INTO telemetry.shipment_projection (
     sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driver_id, status, gtin, product_name,
-    lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence)
+    lot_number, min_temp_celsius, max_temp_celsius, production_date, expiration_date, shelf_life_q10,
+    last_event_sequence)
 VALUES (
     $1, $2, $3, $4::uuid[], $5, $6,
-    $7, $8, $9, $10, $11, $12)
+    $7, $8, $9, $10, $11, $12::date,
+    $13::date, $14::numeric, $15)
 ON CONFLICT (sscc) DO NOTHING
 `
 
@@ -77,6 +87,9 @@ type CreateShipmentParams struct {
 	LotNumber            string
 	MinTempCelsius       float64
 	MaxTempCelsius       float64
+	ProductionDate       *time.Time
+	ExpirationDate       *time.Time
+	ShelfLifeQ10         *float64
 	Sequence             int32
 }
 
@@ -94,6 +107,9 @@ func (q *Queries) CreateShipment(ctx context.Context, arg CreateShipmentParams) 
 		arg.LotNumber,
 		arg.MinTempCelsius,
 		arg.MaxTempCelsius,
+		arg.ProductionDate,
+		arg.ExpirationDate,
+		arg.ShelfLifeQ10,
 		arg.Sequence,
 	)
 	if err != nil {
@@ -104,7 +120,8 @@ func (q *Queries) CreateShipment(ctx context.Context, arg CreateShipmentParams) 
 
 const getShipment = `-- name: GetShipment :one
 SELECT sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driver_id, status, gtin, product_name,
-       lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence, updated_at
+       lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence, updated_at, production_date,
+       expiration_date, shelf_life_q10, monitoring_ended_at, shelf_life_status
 FROM telemetry.shipment_projection
 WHERE sscc = $1
 `
@@ -126,6 +143,11 @@ func (q *Queries) GetShipment(ctx context.Context, sscc string) (TelemetryShipme
 		&i.MaxTempCelsius,
 		&i.LastEventSequence,
 		&i.UpdatedAt,
+		&i.ProductionDate,
+		&i.ExpirationDate,
+		&i.ShelfLifeQ10,
+		&i.MonitoringEndedAt,
+		&i.ShelfLifeStatus,
 	)
 	return i, err
 }
@@ -145,7 +167,8 @@ func (q *Queries) LastEventSequence(ctx context.Context, sscc string) (int32, er
 
 const lockShipments = `-- name: LockShipments :many
 SELECT sscc, shipment_id, owner_tenant_id, participant_tenant_ids, assigned_driver_id, status, gtin, product_name,
-       lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence, updated_at
+       lot_number, min_temp_celsius, max_temp_celsius, last_event_sequence, updated_at, production_date,
+       expiration_date, shelf_life_q10, monitoring_ended_at, shelf_life_status
 FROM telemetry.shipment_projection
 WHERE sscc = ANY (CAST($1::text[] AS bpchar[]))
 ORDER BY sscc
@@ -177,6 +200,11 @@ func (q *Queries) LockShipments(ctx context.Context, ssccs []string) ([]Telemetr
 			&i.MaxTempCelsius,
 			&i.LastEventSequence,
 			&i.UpdatedAt,
+			&i.ProductionDate,
+			&i.ExpirationDate,
+			&i.ShelfLifeQ10,
+			&i.MonitoringEndedAt,
+			&i.ShelfLifeStatus,
 		); err != nil {
 			return nil, err
 		}

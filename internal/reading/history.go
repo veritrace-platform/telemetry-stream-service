@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -38,4 +39,20 @@ func LastBefore(ctx context.Context, db queries.DBTX, sscc string, before time.T
 		return time.Time{}, false, fmt.Errorf("read last reading: %w", err)
 	}
 	return t, true, nil
+}
+
+// InBoundsBefore returns the temperatures of the last limit readings of an SSCC recorded before before within
+// [minCelsius, maxCelsius], oldest first.
+func InBoundsBefore(ctx context.Context, db queries.DBTX, sscc string, before time.Time, minCelsius, maxCelsius float64,
+	limit int,
+) ([]float64, error) {
+	rows, err := queries.New(db).InBoundsBefore(ctx, queries.InBoundsBeforeParams{
+		Sscc: sscc, Before: before, MinCelsius: minCelsius, MaxCelsius: maxCelsius,
+		RowLimit: int32(limit), //nolint:gosec // the level takes a few hundred readings
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read in-bounds readings: %w", err)
+	}
+	slices.Reverse(rows)
+	return rows, nil
 }

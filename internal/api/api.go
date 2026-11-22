@@ -1,5 +1,6 @@
 // Package api serves the telemetry read API (rest-api.md §3.3): a shipment's readings at raw, 1-minute, or
-// 15-minute resolution, and cold-chain incidents per shipment and across the caller's shipments. Every read is
+// 15-minute resolution; cold-chain incidents and excursion warnings per shipment and across the caller's shipments;
+// the forecast quality of the warnings; and a shipment's thermal exposure and shelf-life estimate. Every read is
 // limited to the shipments that the caller may view (access.View).
 package api
 
@@ -68,6 +69,10 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/shipments/{sscc}/incidents", h.shipmentIncidents)
 		r.Get("/incidents", h.incidents)
 		r.Get("/incidents/summary", h.summary)
+		r.Get("/shipments/{sscc}/warnings", h.shipmentWarnings)
+		r.Get("/shipments/{sscc}/thermal-exposure", h.thermalExposure)
+		r.Get("/warnings", h.warnings)
+		r.Get("/warnings/performance", h.performance)
 	})
 }
 
@@ -82,6 +87,12 @@ func (h *Handler) shipment(w http.ResponseWriter, r *http.Request) (projection.S
 	if !ok {
 		return projection.Shipment{}, false
 	}
+	return h.visible(w, r, p, sscc)
+}
+
+// visible returns the projection of an SSCC if the caller may view it, and otherwise answers 404 or 403 and reports
+// false.
+func (h *Handler) visible(w http.ResponseWriter, r *http.Request, p auth.Principal, sscc string) (projection.Shipment, bool) {
 	s, err := projection.NewStore(h.pool).Get(r.Context(), sscc)
 	if errors.Is(err, projection.ErrNotFound) {
 		rest.NotFound(w, r, "shipment")

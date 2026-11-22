@@ -5,14 +5,17 @@ VeriTrace cold-chain telemetry. The service:
 - ingests sensor readings over MQTT and forwards them to Kafka;
 - persists readings in TimescaleDB;
 - detects temperature breaches and records them as hashed incidents;
+- forecasts excursions from the temperature trend and warns minutes ahead, measuring its own forecast quality;
+- measures each shipment's thermal exposure (MKT, time out of bounds) and estimates the shelf life it cost;
 - maintains a shipment projection from `shipment.events`;
-- serves readings and incidents over REST;
-- delivers real-time notifications (breaches, recalls, live readings) over WebSocket.
+- serves readings, incidents, warnings, and thermal exposure over REST;
+- delivers real-time notifications (breaches, warnings, shelf-life alerts, recalls, live readings) over WebSocket.
 
 Platform documentation, including the architecture, domain rules, messaging contracts, and ADRs, lives in
 [`veritrace/docs`](https://github.com/veritrace-platform/veritrace/tree/main/docs).
-The rules this service implements are in `docs/domain/cold-chain-monitoring.md` and
-`docs/adr/0012-cold-chain-detection-engine.md`.
+The rules this service implements are in `docs/domain/cold-chain-monitoring.md`,
+`docs/adr/0012-cold-chain-detection-engine.md`, `docs/adr/0023-predictive-excursion-warnings.md`, and
+`docs/adr/0024-thermal-exposure-and-dynamic-shelf-life.md`.
 
 ## Requirements
 
@@ -70,13 +73,14 @@ and `COMPONENTS` selects the ones an instance runs.
 | Component | Consumes | Produces | Work |
 | --- | --- | --- | --- |
 | `ingest` | MQTT `$share/telemetry-ingest/veritrace/v1/devices/+/telemetry` | `iot.telemetry.raw` | Validates device readings and forwards the accepted ones. A message is acknowledged to the broker after Kafka acknowledges its reading. |
-| `processor` | `iot.telemetry.raw` (group `telemetry-stream-service.processor`) | `iot.telemetry.dlq`, `telemetry.incidents` | Stores readings in the `sensor_readings` hypertable; duplicates are stored once. Records it cannot store go to the dead-letter topic. Runs the breach rules per SSCC and records incidents with their hashes. |
-| `processor` | `shipment.events` (group `telemetry-stream-service.projection`) | `telemetry.incidents` | Keeps `shipment_projection`: status, temperature bounds, participant tenants, and assigned driver of each shipment. Resolves an open incident when its shipment is delivered, cancelled, or recalled. |
-| every instance | `telemetry.incidents`, `shipment.events`, `iot.telemetry.raw` (a group per instance, from the end) | — | Feeds the WebSocket hub: breaches and recalls for the users who may view the shipment, live readings for subscribers. |
+| `processor` | `iot.telemetry.raw` (group `telemetry-stream-service.processor`) | `iot.telemetry.dlq`, `telemetry.incidents`, `telemetry.forecasts` | Stores readings in the `sensor_readings` hypertable; duplicates are stored once. Records it cannot store go to the dead-letter topic. Runs the breach rules per SSCC and records incidents with their hashes; forecasts excursions and records warnings with their outcomes; assesses the shelf life that a breach costs. |
+| `processor` | `shipment.events` (group `telemetry-stream-service.projection`) | `telemetry.incidents`, `telemetry.forecasts` | Keeps `shipment_projection`: status, temperature bounds, lot dates and Q10, participant tenants, and assigned driver of each shipment. When a shipment is delivered, cancelled, or recalled, resolves its open incident and closes its open warning. |
+| every instance | `telemetry.incidents`, `telemetry.forecasts`, `shipment.events`, `iot.telemetry.raw` (a group per instance, from the end) | — | Feeds the WebSocket hub: breaches, warnings, shelf-life alerts, and recalls for the users who may view the shipment, live readings for subscribers. |
 
 Consumers commit offsets only after a batch is stored, so a restart may process a batch again, which is
-harmless: incidents and their events derive their IDs from the episode, so a repeated event is recognizable.
-Episodes live in memory and are rebuilt from the database after a restart or a rebalance. `/readyz` reports
+harmless: incidents, warnings, and their events derive their IDs from what they describe, so a repeated event is
+recognizable. Episodes and forecasts live in memory and are rebuilt from the database after a restart or a
+rebalance. `/readyz` reports
 PostgreSQL, Kafka, the token keys, and, with `ingest`, the MQTT subscription.
 
 ## API
@@ -87,7 +91,11 @@ PostgreSQL, Kafka, the token keys, and, with `ingest`, the MQTT subscription.
 | `GET` | `/api/v1/telemetry/shipments/{sscc}/incidents` | Incidents of one shipment |
 | `GET` | `/api/v1/telemetry/incidents` | Incidents of the caller's shipments (`state=open\|resolved`) |
 | `GET` | `/api/v1/telemetry/incidents/summary` | `{open_count, last_24h_count}` |
-| `GET` | `/ws/v1/notifications` | WebSocket: breaches, recalls, and live readings |
+| `GET` | `/api/v1/telemetry/shipments/{sscc}/warnings` | Excursion warnings of one shipment |
+| `GET` | `/api/v1/telemetry/warnings` | Excursion warnings of the caller's shipments (`state=open\|closed`) |
+| `GET` | `/api/v1/telemetry/warnings/performance` | Forecast quality over `[from, to)`: precision, recall, lead time |
+| `GET` | `/api/v1/telemetry/shipments/{sscc}/thermal-exposure` | Thermal exposure and shelf-life estimate |
+| `GET` | `/ws/v1/notifications` | WebSocket: breaches, warnings, shelf-life alerts, recalls, and live readings |
 
 Access tokens are core's EdDSA tokens, verified with its JWKS. The contract is `api/openapi.yaml`.
 
@@ -100,8 +108,8 @@ internal/httpapi/               REST router and /api/v1 route registration
 internal/stream/                Kafka producer and consumer groups; kafkatest: broker for tests
 internal/api/                   read API handlers
 internal/hub/                   WebSocket hub and its Kafka fan-out
-internal/<domain>/              reading, ingest, processor, detector, incident, projection, auth, access, ...;
-                                SQL in <domain>/queries
+internal/<domain>/              reading, ingest, processor, detector, incident, forecast, warning, exposure,
+                                projection, auth, access, ...; SQL in <domain>/queries
 internal/platform/              config, logging, trace context, HTTP plumbing, admin, database, migrations
 migrations/                     goose SQL migrations (embedded)
 api/openapi.yaml                REST contract
